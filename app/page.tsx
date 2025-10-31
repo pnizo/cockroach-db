@@ -39,6 +39,7 @@ interface Event {
   due_date: string | null;
   assignee: string | null;
   status: string;
+  task_id: string;
 }
 
 // Helper function to format date without timezone issues
