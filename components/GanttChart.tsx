@@ -20,6 +20,12 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
+// Helper function to parse date strings without timezone issues
+const parseDateString = (dateString: string): Date => {
+  // Add time component to ensure local timezone interpretation
+  return new Date(dateString.includes('T') ? dateString : `${dateString}T00:00:00`);
+};
+
 interface Task {
   id: string;
   name: string;
@@ -39,6 +45,7 @@ interface Event {
   due_date: string | null;
   assignee: string | null;
   status: string;
+  task_id: string;
 }
 
 interface GanttChartProps {
@@ -60,6 +67,8 @@ interface SortableTaskRowProps {
   viewMode: ViewMode;
   onTaskClick: (task: Task) => void;
   getStatusColor: (status: string) => string;
+  getEventColor: (status: string) => { bg: string; hover: string; border: string };
+  handleEventClick: (event: Event) => void;
 }
 
 function SortableTaskRow({
@@ -69,6 +78,8 @@ function SortableTaskRow({
   viewMode,
   onTaskClick,
   getStatusColor,
+  getEventColor,
+  handleEventClick,
 }: SortableTaskRowProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
@@ -87,12 +98,19 @@ function SortableTaskRow({
       className="flex border-b border-gray-700 hover:bg-gray-750"
     >
       <div
-        className="w-64 flex-shrink-0 p-2 pl-10 text-gray-300 flex items-center cursor-move"
-        {...attributes}
-        {...listeners}
+        className="w-64 flex-shrink-0 p-2 pl-10 text-gray-300 flex items-center"
       >
-        <span className="mr-2 text-gray-500">⋮⋮</span>
-        <span className="cursor-pointer hover:text-white" onClick={() => onTaskClick(task)}>
+        <span
+          className="mr-2 text-gray-500 cursor-move"
+          {...attributes}
+          {...listeners}
+        >
+          ⋮⋮
+        </span>
+        <span
+          className="cursor-pointer hover:text-white hover:underline"
+          onClick={() => onTaskClick(task)}
+        >
           {task.name}
         </span>
       </div>
@@ -132,10 +150,10 @@ function SortableTaskRow({
             <div className="text-xs text-white px-2 py-1 truncate">{task.name}</div>
           </div>
         )}
-        {/* Event markers */}
-        {task.events.map((event) => {
+        {/* Event markers with balloons */}
+        {task.events.map((event, eventIndex) => {
           if (!event.due_date) return null;
-          const eventDate = new Date(event.due_date);
+          const eventDate = parseDateString(event.due_date);
           const chartStart = timelineDates[0];
           const chartEnd = timelineDates[timelineDates.length - 1];
           const totalDuration = chartEnd.getTime() - chartStart.getTime();
@@ -144,18 +162,34 @@ function SortableTaskRow({
 
           if (eventPos < 0 || eventPos > 100) return null;
 
+          const eventColor = getEventColor(event.status);
+
           return (
             <div
               key={event.id}
-              className="absolute w-3 h-3 bg-red-500 rounded-full border-2 border-white cursor-pointer"
+              className="absolute cursor-pointer group"
               style={{
                 left: `${eventPos}%`,
                 top: '50%',
                 transform: 'translate(-50%, -50%)',
-                zIndex: 20,
+                zIndex: 30,
               }}
-              title={event.name}
-            />
+              onClick={(e) => {
+                e.stopPropagation();
+                handleEventClick(event);
+              }}
+            >
+              {/* Balloon */}
+              <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 whitespace-nowrap pointer-events-none">
+                <div className={`${eventColor.bg} ${eventColor.hover} text-white text-xs px-2 py-1 rounded shadow-md max-w-[150px] truncate pointer-events-auto`}>
+                  {event.name}
+                </div>
+                {/* Arrow pointing down */}
+                <div className={`absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-l-[6px] border-r-[6px] border-t-[6px] border-l-transparent border-r-transparent ${eventColor.border}`}></div>
+              </div>
+              {/* Dot */}
+              <div className={`w-3 h-3 ${eventColor.bg} rounded-full border-2 border-white`}></div>
+            </div>
           );
         })}
       </div>
@@ -204,11 +238,51 @@ export default function GanttChart({ tasks, onTaskClick, onRefresh }: GanttChart
   const [isEventFormOpen, setIsEventFormOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [localTasks, setLocalTasks] = useState<Task[]>(tasks);
+  const [categoryOrders, setCategoryOrders] = useState<Record<string, number>>({});
+  const [subCategoryOrders, setSubCategoryOrders] = useState<Record<string, number>>({});
 
   // Sync local tasks with props
   useEffect(() => {
     setLocalTasks(tasks);
+  }, [tasks]);
+
+  // Fetch category orders
+  useEffect(() => {
+    const fetchCategoryOrders = async () => {
+      try {
+        const response = await fetch('/api/category-order');
+        const data = await response.json();
+        const orders: Record<string, number> = {};
+        data.orders.forEach((order: any) => {
+          orders[order.category] = order.display_order;
+        });
+        setCategoryOrders(orders);
+      } catch (error) {
+        console.error('Error fetching category orders:', error);
+      }
+    };
+    fetchCategoryOrders();
+  }, [tasks]);
+
+  // Fetch subcategory orders
+  useEffect(() => {
+    const fetchSubCategoryOrders = async () => {
+      try {
+        const response = await fetch('/api/subcategory-order');
+        const data = await response.json();
+        const orders: Record<string, number> = {};
+        data.orders.forEach((order: any) => {
+          const key = `${order.category}-${order.sub_category}`;
+          orders[key] = order.display_order;
+        });
+        setSubCategoryOrders(orders);
+      } catch (error) {
+        console.error('Error fetching subcategory orders:', error);
+      }
+    };
+    fetchSubCategoryOrders();
   }, [tasks]);
 
   // Save expanded categories to localStorage when changed
@@ -257,6 +331,28 @@ export default function GanttChart({ tasks, onTaskClick, onRefresh }: GanttChart
     return groups;
   }, [localTasks]);
 
+  // Get sorted categories based on display_order
+  const sortedCategories = useMemo(() => {
+    const categories = Object.keys(groupedTasks);
+    return categories.sort((a, b) => {
+      const orderA = categoryOrders[a] ?? 999999;
+      const orderB = categoryOrders[b] ?? 999999;
+      return orderA - orderB;
+    });
+  }, [groupedTasks, categoryOrders]);
+
+  // Get sorted subcategories for a category based on display_order
+  const getSortedSubCategories = (category: string) => {
+    const subCategories = Object.keys(groupedTasks[category] || {});
+    return subCategories.sort((a, b) => {
+      const keyA = `${category}-${a}`;
+      const keyB = `${category}-${b}`;
+      const orderA = subCategoryOrders[keyA] ?? 999999;
+      const orderB = subCategoryOrders[keyB] ?? 999999;
+      return orderA - orderB;
+    });
+  };
+
   // Generate timeline dates
   const timelineDates = useMemo(() => {
     const dates: Date[] = [];
@@ -302,17 +398,60 @@ export default function GanttChart({ tasks, onTaskClick, onRefresh }: GanttChart
     setExpandedSubCategories(newExpanded);
   };
 
+  const moveCategoryOrder = async (category: string, direction: 'up' | 'down') => {
+    try {
+      const response = await fetch('/api/category-order', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category, direction }),
+      });
+
+      if (!response.ok) throw new Error('Failed to update category order');
+
+      const data = await response.json();
+      const orders: Record<string, number> = {};
+      data.orders.forEach((order: any) => {
+        orders[order.category] = order.display_order;
+      });
+      setCategoryOrders(orders);
+    } catch (error) {
+      console.error('Error updating category order:', error);
+    }
+  };
+
+  const moveSubCategoryOrder = async (category: string, subCategory: string, direction: 'up' | 'down') => {
+    try {
+      const response = await fetch('/api/subcategory-order', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category, sub_category: subCategory, direction }),
+      });
+
+      if (!response.ok) throw new Error('Failed to update subcategory order');
+
+      const data = await response.json();
+      const orders: Record<string, number> = {};
+      data.orders.forEach((order: any) => {
+        const key = `${order.category}-${order.sub_category}`;
+        orders[key] = order.display_order;
+      });
+      setSubCategoryOrders(orders);
+    } catch (error) {
+      console.error('Error updating subcategory order:', error);
+    }
+  };
+
   const getTaskPosition = (task: Task) => {
     const taskStart = task.start_date
-      ? new Date(task.start_date)
+      ? parseDateString(task.start_date)
       : task.events.length > 0
-      ? new Date(Math.min(...task.events.filter(e => e.due_date).map(e => new Date(e.due_date!).getTime())))
+      ? new Date(Math.min(...task.events.filter(e => e.due_date).map(e => parseDateString(e.due_date!).getTime())))
       : null;
 
     const taskEnd = task.end_date
-      ? new Date(task.end_date)
+      ? parseDateString(task.end_date)
       : task.events.length > 0
-      ? new Date(Math.max(...task.events.filter(e => e.due_date).map(e => new Date(e.due_date!).getTime())))
+      ? new Date(Math.max(...task.events.filter(e => e.due_date).map(e => parseDateString(e.due_date!).getTime())))
       : null;
 
     if (!taskStart || !taskEnd) return null;
@@ -342,15 +481,15 @@ export default function GanttChart({ tasks, onTaskClick, onRefresh }: GanttChart
 
     tasks.forEach((task) => {
       const taskStart = task.start_date
-        ? new Date(task.start_date)
+        ? parseDateString(task.start_date)
         : task.events.length > 0
-        ? new Date(Math.min(...task.events.filter(e => e.due_date).map(e => new Date(e.due_date!).getTime())))
+        ? new Date(Math.min(...task.events.filter(e => e.due_date).map(e => parseDateString(e.due_date!).getTime())))
         : null;
 
       const taskEnd = task.end_date
-        ? new Date(task.end_date)
+        ? parseDateString(task.end_date)
         : task.events.length > 0
-        ? new Date(Math.max(...task.events.filter(e => e.due_date).map(e => new Date(e.due_date!).getTime())))
+        ? new Date(Math.max(...task.events.filter(e => e.due_date).map(e => parseDateString(e.due_date!).getTime())))
         : null;
 
       if (taskStart) allDates.push(taskStart);
@@ -396,6 +535,23 @@ export default function GanttChart({ tasks, onTaskClick, onRefresh }: GanttChart
       Done: 'bg-green-500',
     };
     return colors[status] || 'bg-gray-500';
+  };
+
+  const getEventColor = (status: string) => {
+    const colors: Record<string, { bg: string; hover: string; border: string }> = {
+      ToDo: { bg: 'bg-gray-500', hover: 'hover:bg-gray-400', border: 'border-t-gray-500' },
+      InProgress: { bg: 'bg-blue-500', hover: 'hover:bg-blue-400', border: 'border-t-blue-500' },
+      Confirmed: { bg: 'bg-yellow-500', hover: 'hover:bg-yellow-400', border: 'border-t-yellow-500' },
+      IceBox: { bg: 'bg-purple-500', hover: 'hover:bg-purple-400', border: 'border-t-purple-500' },
+      Done: { bg: 'bg-green-500', hover: 'hover:bg-green-400', border: 'border-t-green-500' },
+    };
+    return colors[status] || { bg: 'bg-red-500', hover: 'hover:bg-red-400', border: 'border-t-red-500' };
+  };
+
+  const handleEventClick = (event: Event) => {
+    setSelectedEvent(event);
+    setSelectedTaskId(event.task_id);
+    setIsEventFormOpen(true);
   };
 
   const formatDate = (date: Date) => {
@@ -562,7 +718,8 @@ export default function GanttChart({ tasks, onTaskClick, onRefresh }: GanttChart
             </div>
 
             {/* Tasks grouped by category and subcategory */}
-            {Object.entries(groupedTasks).map(([category, subCategories]) => {
+            {sortedCategories.map((category, categoryIndex) => {
+              const subCategories = groupedTasks[category];
               // Get all tasks in this category
               const allCategoryTasks: Task[] = [];
               Object.values(subCategories).forEach((tasks) => {
@@ -570,16 +727,58 @@ export default function GanttChart({ tasks, onTaskClick, onRefresh }: GanttChart
               });
               const categoryPosition = getCategoryPosition(allCategoryTasks);
 
+              const isFirstCategory = categoryIndex === 0;
+              const isLastCategory = categoryIndex === sortedCategories.length - 1;
+
               return (
                 <div key={category}>
                   {/* Category header */}
-                  <div className="flex bg-gray-700 cursor-pointer hover:bg-gray-600">
-                    <div
-                      className="w-64 flex-shrink-0 p-2 font-bold text-white flex items-center"
-                      onClick={() => toggleCategory(category)}
-                    >
-                      <span className="mr-2">{expandedCategories.has(category) ? '▼' : '▶'}</span>
-                      {category}
+                  <div className="flex bg-gray-700 hover:bg-gray-600">
+                    <div className="w-64 flex-shrink-0 p-2 font-bold text-white flex items-center gap-2">
+                      <span
+                        className="cursor-pointer"
+                        onClick={() => toggleCategory(category)}
+                      >
+                        {expandedCategories.has(category) ? '▼' : '▶'}
+                      </span>
+                      <span
+                        className="flex-1 cursor-pointer"
+                        onClick={() => toggleCategory(category)}
+                      >
+                        {category}
+                      </span>
+                      <div className="flex gap-1">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!isFirstCategory) moveCategoryOrder(category, 'up');
+                          }}
+                          disabled={isFirstCategory}
+                          className={`text-xs px-1 py-0.5 rounded ${
+                            isFirstCategory
+                              ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                              : 'bg-gray-600 hover:bg-gray-500 cursor-pointer'
+                          }`}
+                          title={isFirstCategory ? '一番上です' : '上へ移動'}
+                        >
+                          ▲
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!isLastCategory) moveCategoryOrder(category, 'down');
+                          }}
+                          disabled={isLastCategory}
+                          className={`text-xs px-1 py-0.5 rounded ${
+                            isLastCategory
+                              ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                              : 'bg-gray-600 hover:bg-gray-500 cursor-pointer'
+                          }`}
+                          title={isLastCategory ? '一番下です' : '下へ移動'}
+                        >
+                          ▼
+                        </button>
+                      </div>
                     </div>
                     <div className="flex-1 flex relative p-2">
                       {timelineDates.map((date, index) => {
@@ -616,22 +815,63 @@ export default function GanttChart({ tasks, onTaskClick, onRefresh }: GanttChart
 
                   {/* Subcategories */}
                   {expandedCategories.has(category) &&
-                    Object.entries(subCategories).map(([subCategory, subTasks]) => {
+                    getSortedSubCategories(category).map((subCategory, subCategoryIndex, subCategoryArray) => {
+                      const subTasks = subCategories[subCategory];
                       const subCategoryKey = `${category}-${subCategory}`;
                       const subCategoryPosition = getCategoryPosition(subTasks);
+
+                      const isFirstSubCategory = subCategoryIndex === 0;
+                      const isLastSubCategory = subCategoryIndex === subCategoryArray.length - 1;
 
                       return (
                         <div key={subCategoryKey}>
                           {/* Subcategory header */}
-                          <div className="flex bg-gray-750 cursor-pointer hover:bg-gray-650">
-                            <div
-                              className="w-64 flex-shrink-0 p-2 pl-6 font-semibold text-gray-200 flex items-center"
-                              onClick={() => toggleSubCategory(subCategoryKey)}
-                            >
-                              <span className="mr-2">
+                          <div className="flex bg-gray-750 hover:bg-gray-650">
+                            <div className="w-64 flex-shrink-0 p-2 pl-6 font-semibold text-gray-200 flex items-center gap-2">
+                              <span
+                                className="cursor-pointer"
+                                onClick={() => toggleSubCategory(subCategoryKey)}
+                              >
                                 {expandedSubCategories.has(subCategoryKey) ? '▼' : '▶'}
                               </span>
-                              {subCategory}
+                              <span
+                                className="flex-1 cursor-pointer"
+                                onClick={() => toggleSubCategory(subCategoryKey)}
+                              >
+                                {subCategory}
+                              </span>
+                              <div className="flex gap-1">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (!isFirstSubCategory) moveSubCategoryOrder(category, subCategory, 'up');
+                                  }}
+                                  disabled={isFirstSubCategory}
+                                  className={`text-xs px-1 py-0.5 rounded ${
+                                    isFirstSubCategory
+                                      ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                                      : 'bg-gray-600 hover:bg-gray-500 cursor-pointer'
+                                  }`}
+                                  title={isFirstSubCategory ? '一番上です' : '上へ移動'}
+                                >
+                                  ▲
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (!isLastSubCategory) moveSubCategoryOrder(category, subCategory, 'down');
+                                  }}
+                                  disabled={isLastSubCategory}
+                                  className={`text-xs px-1 py-0.5 rounded ${
+                                    isLastSubCategory
+                                      ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                                      : 'bg-gray-600 hover:bg-gray-500 cursor-pointer'
+                                  }`}
+                                  title={isLastSubCategory ? '一番下です' : '下へ移動'}
+                                >
+                                  ▼
+                                </button>
+                              </div>
                             </div>
                             <div className="flex-1 flex relative p-2">
                               {timelineDates.map((date, index) => {
@@ -683,6 +923,8 @@ export default function GanttChart({ tasks, onTaskClick, onRefresh }: GanttChart
                                 viewMode={viewMode}
                                 onTaskClick={onTaskClick}
                                 getStatusColor={getStatusColor}
+                                getEventColor={getEventColor}
+                                handleEventClick={handleEventClick}
                               />
                             );
                           })}
@@ -703,9 +945,11 @@ export default function GanttChart({ tasks, onTaskClick, onRefresh }: GanttChart
             setIsEventFormOpen(false);
             setSelectedTaskId(null);
             setSelectedDate(null);
+            setSelectedEvent(null);
           }}
           onSave={onRefresh}
           taskId={selectedTaskId || undefined}
+          editData={selectedEvent}
         />
       </div>
     </DndContext>
