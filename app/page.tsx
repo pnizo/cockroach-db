@@ -4,6 +4,21 @@ import { useState, useEffect } from 'react';
 import GanttChart from '@/components/GanttChart';
 import TaskForm from '@/components/TaskForm';
 import Link from 'next/link';
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  useSortable,
+  horizontalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 interface Task {
   id: string;
@@ -26,6 +41,363 @@ interface Event {
   status: string;
 }
 
+// Helper function to format date without timezone issues
+const formatDateDisplay = (dateString: string | null): string => {
+  if (!dateString) return '-';
+  // Add time component to ensure local timezone interpretation
+  const date = new Date(dateString.includes('T') ? dateString : `${dateString}T00:00:00`);
+  return date.toLocaleDateString('ja-JP');
+};
+
+// Column definitions
+interface ColumnDefinition {
+  id: string;
+  label: string;
+  field: keyof Task | 'actions';
+  sortable: boolean;
+}
+
+const DEFAULT_COLUMNS: ColumnDefinition[] = [
+  { id: 'category', label: 'カテゴリー', field: 'category', sortable: true },
+  { id: 'sub_category', label: 'サブカテゴリー', field: 'sub_category', sortable: true },
+  { id: 'name', label: 'タスク名', field: 'name', sortable: true },
+  { id: 'start_date', label: '開始日', field: 'start_date', sortable: true },
+  { id: 'end_date', label: '終了日', field: 'end_date', sortable: true },
+  { id: 'assignee', label: '担当者', field: 'assignee', sortable: true },
+  { id: 'status', label: 'ステータス', field: 'status', sortable: true },
+  { id: 'actions', label: 'アクション', field: 'actions', sortable: false },
+];
+
+const COLUMN_ORDER_STORAGE_KEY = 'task_list_column_order';
+
+// Sortable Header Component
+interface SortableHeaderProps {
+  column: ColumnDefinition;
+  sortField: string | null;
+  sortDirection: 'asc' | 'desc';
+  onSort: (field: string) => void;
+}
+
+function SortableHeader({ column, sortField, sortDirection, onSort }: SortableHeaderProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: column.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    cursor: 'move',
+  };
+
+  return (
+    <th
+      ref={setNodeRef}
+      style={style}
+      className={`px-4 py-3 ${column.sortable ? 'cursor-pointer hover:bg-gray-600' : ''}`}
+      {...attributes}
+      {...listeners}
+    >
+      <div
+        className="flex items-center gap-2"
+        onClick={(e) => {
+          if (column.sortable) {
+            e.stopPropagation();
+            onSort(column.field as string);
+          }
+        }}
+      >
+        <span className="select-none">⋮⋮</span>
+        <span>
+          {column.label} {column.sortable && sortField === column.field && (sortDirection === 'asc' ? '▲' : '▼')}
+        </span>
+      </div>
+    </th>
+  );
+}
+
+interface TaskRowProps {
+  task: Task;
+  columns: ColumnDefinition[];
+  editingCell: { taskId: string; field: string } | null;
+  editingValue: string;
+  setEditingValue: (value: string) => void;
+  handleCellClick: (taskId: string, field: string, currentValue: any) => void;
+  handleCellSave: () => void;
+  handleKeyDown: (e: React.KeyboardEvent) => void;
+  handleDuplicateTask: (task: Task) => void;
+  handleDeleteTask: (taskId: string) => void;
+  categories: string[];
+  subCategories: string[];
+  members: any[];
+}
+
+function TaskRow({
+  task,
+  columns,
+  editingCell,
+  editingValue,
+  setEditingValue,
+  handleCellClick,
+  handleCellSave,
+  handleKeyDown,
+  handleDuplicateTask,
+  handleDeleteTask,
+  categories,
+  subCategories,
+  members,
+}: TaskRowProps) {
+  const renderCell = (column: ColumnDefinition) => {
+    const field = column.field;
+
+    if (field === 'actions') {
+      return (
+        <td key={column.id} className="px-4 py-3">
+          <div className="flex gap-2">
+            <button
+              onClick={() => handleDuplicateTask(task)}
+              className="text-xs px-2 py-1 bg-blue-600 hover:bg-blue-700 rounded"
+            >
+              複製
+            </button>
+            <button
+              onClick={() => handleDeleteTask(task.id)}
+              className="text-xs px-2 py-1 bg-red-600 hover:bg-red-700 rounded"
+            >
+              削除
+            </button>
+          </div>
+        </td>
+      );
+    }
+
+    const isEditing = editingCell?.taskId === task.id && editingCell?.field === field;
+
+    if (field === 'category') {
+      return (
+        <td
+          key={column.id}
+          className="px-4 py-3 cursor-pointer hover:bg-gray-700"
+          onClick={() => !isEditing && handleCellClick(task.id, field, task.category)}
+        >
+          {isEditing ? (
+            <>
+              <input
+                type="text"
+                value={editingValue}
+                onChange={(e) => setEditingValue(e.target.value)}
+                onBlur={handleCellSave}
+                onKeyDown={handleKeyDown}
+                list="category-list-inline"
+                autoFocus
+                className="w-full px-2 py-1 bg-gray-600 text-white rounded border border-gray-500 focus:border-blue-500 focus:outline-none"
+              />
+              <datalist id="category-list-inline">
+                {categories.map((cat) => (
+                  <option key={cat} value={cat} />
+                ))}
+              </datalist>
+            </>
+          ) : (
+            task.category
+          )}
+        </td>
+      );
+    }
+
+    if (field === 'sub_category') {
+      return (
+        <td
+          key={column.id}
+          className="px-4 py-3 cursor-pointer hover:bg-gray-700"
+          onClick={() => !isEditing && handleCellClick(task.id, field, task.sub_category)}
+        >
+          {isEditing ? (
+            <>
+              <input
+                type="text"
+                value={editingValue}
+                onChange={(e) => setEditingValue(e.target.value)}
+                onBlur={handleCellSave}
+                onKeyDown={handleKeyDown}
+                list="subcategory-list-inline"
+                autoFocus
+                className="w-full px-2 py-1 bg-gray-600 text-white rounded border border-gray-500 focus:border-blue-500 focus:outline-none"
+              />
+              <datalist id="subcategory-list-inline">
+                {subCategories.map((subCat) => (
+                  <option key={subCat} value={subCat} />
+                ))}
+              </datalist>
+            </>
+          ) : (
+            task.sub_category
+          )}
+        </td>
+      );
+    }
+
+    if (field === 'name') {
+      return (
+        <td
+          key={column.id}
+          className="px-4 py-3 cursor-pointer hover:bg-gray-700"
+          onClick={() => !isEditing && handleCellClick(task.id, field, task.name)}
+        >
+          {isEditing ? (
+            <input
+              type="text"
+              value={editingValue}
+              onChange={(e) => setEditingValue(e.target.value)}
+              onBlur={handleCellSave}
+              onKeyDown={handleKeyDown}
+              autoFocus
+              className="w-full px-2 py-1 bg-gray-600 text-white rounded border border-gray-500 focus:border-blue-500 focus:outline-none"
+            />
+          ) : (
+            task.name
+          )}
+        </td>
+      );
+    }
+
+    if (field === 'start_date') {
+      return (
+        <td
+          key={column.id}
+          className="px-4 py-3 cursor-pointer hover:bg-gray-700"
+          onClick={() => !isEditing && handleCellClick(task.id, field, task.start_date ? task.start_date.split('T')[0] : '')}
+        >
+          {isEditing ? (
+            <input
+              type="date"
+              value={editingValue}
+              onChange={(e) => setEditingValue(e.target.value)}
+              onBlur={handleCellSave}
+              onKeyDown={handleKeyDown}
+              autoFocus
+              className="w-full px-2 py-1 bg-gray-600 text-white rounded border border-gray-500 focus:border-blue-500 focus:outline-none"
+            />
+          ) : (
+            formatDateDisplay(task.start_date)
+          )}
+        </td>
+      );
+    }
+
+    if (field === 'end_date') {
+      return (
+        <td
+          key={column.id}
+          className="px-4 py-3 cursor-pointer hover:bg-gray-700"
+          onClick={() => !isEditing && handleCellClick(task.id, field, task.end_date ? task.end_date.split('T')[0] : '')}
+        >
+          {isEditing ? (
+            <input
+              type="date"
+              value={editingValue}
+              onChange={(e) => setEditingValue(e.target.value)}
+              onBlur={handleCellSave}
+              onKeyDown={handleKeyDown}
+              autoFocus
+              className="w-full px-2 py-1 bg-gray-600 text-white rounded border border-gray-500 focus:border-blue-500 focus:outline-none"
+            />
+          ) : (
+            formatDateDisplay(task.end_date)
+          )}
+        </td>
+      );
+    }
+
+    if (field === 'assignee') {
+      return (
+        <td
+          key={column.id}
+          className="px-4 py-3 cursor-pointer hover:bg-gray-700"
+          onClick={() => !isEditing && handleCellClick(task.id, field, task.assignee || '')}
+        >
+          {isEditing ? (
+            <select
+              value={editingValue}
+              onChange={(e) => setEditingValue(e.target.value)}
+              onBlur={handleCellSave}
+              onKeyDown={handleKeyDown}
+              autoFocus
+              className="w-full px-2 py-1 bg-gray-600 text-white rounded border border-gray-500 focus:border-blue-500 focus:outline-none"
+            >
+              <option value="">未割り当て</option>
+              {members.map((member) => (
+                <option key={member.id} value={member.name}>
+                  {member.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            task.assignee || '-'
+          )}
+        </td>
+      );
+    }
+
+    if (field === 'status') {
+      return (
+        <td
+          key={column.id}
+          className="px-4 py-3 cursor-pointer hover:bg-gray-700"
+          onClick={() => !isEditing && handleCellClick(task.id, field, task.status)}
+        >
+          {isEditing ? (
+            <select
+              value={editingValue}
+              onChange={(e) => setEditingValue(e.target.value)}
+              onBlur={handleCellSave}
+              onKeyDown={handleKeyDown}
+              autoFocus
+              className="w-full px-2 py-1 bg-gray-600 text-white rounded border border-gray-500 focus:border-blue-500 focus:outline-none"
+            >
+              <option value="ToDo">ToDo</option>
+              <option value="InProgress">InProgress</option>
+              <option value="Confirmed">Confirmed</option>
+              <option value="IceBox">IceBox</option>
+              <option value="Done">Done</option>
+            </select>
+          ) : (
+            <span
+              className={`px-2 py-1 rounded text-xs ${
+                task.status === 'Done'
+                  ? 'bg-green-600'
+                  : task.status === 'InProgress'
+                  ? 'bg-blue-600'
+                  : task.status === 'Confirmed'
+                  ? 'bg-yellow-600'
+                  : task.status === 'IceBox'
+                  ? 'bg-purple-600'
+                  : 'bg-gray-600'
+              }`}
+            >
+              {task.status}
+            </span>
+          )}
+        </td>
+      );
+    }
+
+    return <td key={column.id}></td>;
+  };
+
+  return (
+    <tr className="border-b border-gray-700 hover:bg-gray-700/50">
+      {columns.map((column) => renderCell(column))}
+    </tr>
+  );
+}
+
+
 export default function Home() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
@@ -44,11 +416,44 @@ export default function Home() {
   const [sortField, setSortField] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
+  // Column order management
+  const [columnOrder, setColumnOrder] = useState<ColumnDefinition[]>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(COLUMN_ORDER_STORAGE_KEY);
+      if (saved) {
+        try {
+          const savedIds = JSON.parse(saved);
+          return savedIds.map((id: string) => DEFAULT_COLUMNS.find(col => col.id === id)!).filter(Boolean);
+        } catch (e) {
+          return DEFAULT_COLUMNS;
+        }
+      }
+    }
+    return DEFAULT_COLUMNS;
+  });
+
+  // Setup sensors for column drag and drop
+  const columnSensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8, // 8px movement required before drag starts
+      },
+    })
+  );
+
   const fetchTasks = async () => {
     try {
       setLoading(true);
       const response = await fetch('/api/tasks');
       const data = await response.json();
+
+      // console.log('=== fetchTasks DEBUG ===');
+      // if (data.tasks && data.tasks.length > 0) {
+      //   console.log('First task from API:', data.tasks[0]);
+      //   console.log('First task start_date:', data.tasks[0]?.start_date);
+      //   console.log('First task end_date:', data.tasks[0]?.end_date);
+      // }
+      // console.log('=== END fetchTasks DEBUG ===');
 
       if (!response.ok) {
         throw new Error(data.error || 'Failed to fetch tasks');
@@ -218,6 +623,28 @@ export default function Home() {
     }
   };
 
+  // Save column order to localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(COLUMN_ORDER_STORAGE_KEY, JSON.stringify(columnOrder.map(col => col.id)));
+    }
+  }, [columnOrder]);
+
+  const handleColumnDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (!over || active.id === over.id) {
+      return;
+    }
+
+    const oldIndex = columnOrder.findIndex((col) => col.id === active.id);
+    const newIndex = columnOrder.findIndex((col) => col.id === over.id);
+
+    if (oldIndex !== -1 && newIndex !== -1) {
+      setColumnOrder(arrayMove(columnOrder, oldIndex, newIndex));
+    }
+  };
+
   const handleSort = (field: string) => {
     if (sortField === field) {
       setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
@@ -294,8 +721,7 @@ export default function Home() {
         <header className="mb-8">
           <div className="flex justify-between items-center mb-6">
             <div>
-              <h1 className="text-4xl font-bold mb-2">タスク管理システム</h1>
-              <p className="text-gray-400">ガントチャートでタスクを管理</p>
+              <h1 className="text-4xl font-bold mb-2">コンテンツ事業進行表</h1>
             </div>
             <div className="flex gap-4">
               <Link
@@ -405,260 +831,52 @@ export default function Home() {
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="text-xs uppercase bg-gray-700 text-gray-300">
-                  <tr>
-                    <th
-                      className="px-4 py-3 cursor-pointer hover:bg-gray-600"
-                      onClick={() => handleSort('name')}
+              <DndContext
+                sensors={columnSensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleColumnDragEnd}
+              >
+                <table className="w-full text-sm">
+                  <thead className="text-xs uppercase bg-gray-700 text-gray-300">
+                    <SortableContext
+                      items={columnOrder.map((col) => col.id)}
+                      strategy={horizontalListSortingStrategy}
                     >
-                      タスク名 {sortField === 'name' && (sortDirection === 'asc' ? '▲' : '▼')}
-                    </th>
-                    <th
-                      className="px-4 py-3 cursor-pointer hover:bg-gray-600"
-                      onClick={() => handleSort('category')}
-                    >
-                      カテゴリー {sortField === 'category' && (sortDirection === 'asc' ? '▲' : '▼')}
-                    </th>
-                    <th
-                      className="px-4 py-3 cursor-pointer hover:bg-gray-600"
-                      onClick={() => handleSort('sub_category')}
-                    >
-                      サブカテゴリー {sortField === 'sub_category' && (sortDirection === 'asc' ? '▲' : '▼')}
-                    </th>
-                    <th
-                      className="px-4 py-3 cursor-pointer hover:bg-gray-600"
-                      onClick={() => handleSort('start_date')}
-                    >
-                      開始日 {sortField === 'start_date' && (sortDirection === 'asc' ? '▲' : '▼')}
-                    </th>
-                    <th
-                      className="px-4 py-3 cursor-pointer hover:bg-gray-600"
-                      onClick={() => handleSort('end_date')}
-                    >
-                      終了日 {sortField === 'end_date' && (sortDirection === 'asc' ? '▲' : '▼')}
-                    </th>
-                    <th
-                      className="px-4 py-3 cursor-pointer hover:bg-gray-600"
-                      onClick={() => handleSort('assignee')}
-                    >
-                      担当者 {sortField === 'assignee' && (sortDirection === 'asc' ? '▲' : '▼')}
-                    </th>
-                    <th
-                      className="px-4 py-3 cursor-pointer hover:bg-gray-600"
-                      onClick={() => handleSort('status')}
-                    >
-                      ステータス {sortField === 'status' && (sortDirection === 'asc' ? '▲' : '▼')}
-                    </th>
-                    <th className="px-4 py-3">アクション</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredAndSortedTasks.map((task) => (
-                  <tr
-                    key={task.id}
-                    className="border-b border-gray-700 hover:bg-gray-700/50"
-                  >
-                    {/* Task name */}
-                    <td
-                      className="px-4 py-3 cursor-pointer hover:bg-gray-700"
-                      onClick={() => editingCell?.taskId !== task.id && handleCellClick(task.id, 'name', task.name)}
-                    >
-                      {editingCell?.taskId === task.id && editingCell?.field === 'name' ? (
-                        <input
-                          type="text"
-                          value={editingValue}
-                          onChange={(e) => setEditingValue(e.target.value)}
-                          onBlur={handleCellSave}
-                          onKeyDown={handleKeyDown}
-                          autoFocus
-                          className="w-full px-2 py-1 bg-gray-600 text-white rounded border border-gray-500 focus:border-blue-500 focus:outline-none"
-                        />
-                      ) : (
-                        task.name
-                      )}
-                    </td>
-
-                    {/* Category */}
-                    <td
-                      className="px-4 py-3 cursor-pointer hover:bg-gray-700"
-                      onClick={() => editingCell?.taskId !== task.id && handleCellClick(task.id, 'category', task.category)}
-                    >
-                      {editingCell?.taskId === task.id && editingCell?.field === 'category' ? (
-                        <>
-                          <input
-                            type="text"
-                            value={editingValue}
-                            onChange={(e) => setEditingValue(e.target.value)}
-                            onBlur={handleCellSave}
-                            onKeyDown={handleKeyDown}
-                            list="category-list-inline"
-                            autoFocus
-                            className="w-full px-2 py-1 bg-gray-600 text-white rounded border border-gray-500 focus:border-blue-500 focus:outline-none"
+                      <tr>
+                        {columnOrder.map((column) => (
+                          <SortableHeader
+                            key={column.id}
+                            column={column}
+                            sortField={sortField}
+                            sortDirection={sortDirection}
+                            onSort={handleSort}
                           />
-                          <datalist id="category-list-inline">
-                            {categories.map((cat) => (
-                              <option key={cat} value={cat} />
-                            ))}
-                          </datalist>
-                        </>
-                      ) : (
-                        task.category
-                      )}
-                    </td>
-
-                    {/* Sub category */}
-                    <td
-                      className="px-4 py-3 cursor-pointer hover:bg-gray-700"
-                      onClick={() => editingCell?.taskId !== task.id && handleCellClick(task.id, 'sub_category', task.sub_category)}
-                    >
-                      {editingCell?.taskId === task.id && editingCell?.field === 'sub_category' ? (
-                        <>
-                          <input
-                            type="text"
-                            value={editingValue}
-                            onChange={(e) => setEditingValue(e.target.value)}
-                            onBlur={handleCellSave}
-                            onKeyDown={handleKeyDown}
-                            list="subcategory-list-inline"
-                            autoFocus
-                            className="w-full px-2 py-1 bg-gray-600 text-white rounded border border-gray-500 focus:border-blue-500 focus:outline-none"
-                          />
-                          <datalist id="subcategory-list-inline">
-                            {subCategories.map((subCat) => (
-                              <option key={subCat} value={subCat} />
-                            ))}
-                          </datalist>
-                        </>
-                      ) : (
-                        task.sub_category
-                      )}
-                    </td>
-
-                    {/* Start date */}
-                    <td
-                      className="px-4 py-3 cursor-pointer hover:bg-gray-700"
-                      onClick={() => editingCell?.taskId !== task.id && handleCellClick(task.id, 'start_date', task.start_date ? task.start_date.split('T')[0] : '')}
-                    >
-                      {editingCell?.taskId === task.id && editingCell?.field === 'start_date' ? (
-                        <input
-                          type="date"
-                          value={editingValue}
-                          onChange={(e) => setEditingValue(e.target.value)}
-                          onBlur={handleCellSave}
-                          onKeyDown={handleKeyDown}
-                          autoFocus
-                          className="w-full px-2 py-1 bg-gray-600 text-white rounded border border-gray-500 focus:border-blue-500 focus:outline-none"
-                        />
-                      ) : (
-                        task.start_date ? new Date(task.start_date).toLocaleDateString('ja-JP') : '-'
-                      )}
-                    </td>
-
-                    {/* End date */}
-                    <td
-                      className="px-4 py-3 cursor-pointer hover:bg-gray-700"
-                      onClick={() => editingCell?.taskId !== task.id && handleCellClick(task.id, 'end_date', task.end_date ? task.end_date.split('T')[0] : '')}
-                    >
-                      {editingCell?.taskId === task.id && editingCell?.field === 'end_date' ? (
-                        <input
-                          type="date"
-                          value={editingValue}
-                          onChange={(e) => setEditingValue(e.target.value)}
-                          onBlur={handleCellSave}
-                          onKeyDown={handleKeyDown}
-                          autoFocus
-                          className="w-full px-2 py-1 bg-gray-600 text-white rounded border border-gray-500 focus:border-blue-500 focus:outline-none"
-                        />
-                      ) : (
-                        task.end_date ? new Date(task.end_date).toLocaleDateString('ja-JP') : '-'
-                      )}
-                    </td>
-
-                    {/* Assignee */}
-                    <td
-                      className="px-4 py-3 cursor-pointer hover:bg-gray-700"
-                      onClick={() => editingCell?.taskId !== task.id && handleCellClick(task.id, 'assignee', task.assignee || '')}
-                    >
-                      {editingCell?.taskId === task.id && editingCell?.field === 'assignee' ? (
-                        <select
-                          value={editingValue}
-                          onChange={(e) => setEditingValue(e.target.value)}
-                          onBlur={handleCellSave}
-                          onKeyDown={handleKeyDown}
-                          autoFocus
-                          className="w-full px-2 py-1 bg-gray-600 text-white rounded border border-gray-500 focus:border-blue-500 focus:outline-none"
-                        >
-                          <option value="">未割り当て</option>
-                          {members.map((member) => (
-                            <option key={member.id} value={member.name}>
-                              {member.name}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        task.assignee || '-'
-                      )}
-                    </td>
-
-                    {/* Status */}
-                    <td
-                      className="px-4 py-3 cursor-pointer hover:bg-gray-700"
-                      onClick={() => editingCell?.taskId !== task.id && handleCellClick(task.id, 'status', task.status)}
-                    >
-                      {editingCell?.taskId === task.id && editingCell?.field === 'status' ? (
-                        <select
-                          value={editingValue}
-                          onChange={(e) => setEditingValue(e.target.value)}
-                          onBlur={handleCellSave}
-                          onKeyDown={handleKeyDown}
-                          autoFocus
-                          className="w-full px-2 py-1 bg-gray-600 text-white rounded border border-gray-500 focus:border-blue-500 focus:outline-none"
-                        >
-                          <option value="ToDo">ToDo</option>
-                          <option value="InProgress">InProgress</option>
-                          <option value="Confirmed">Confirmed</option>
-                          <option value="IceBox">IceBox</option>
-                          <option value="Done">Done</option>
-                        </select>
-                      ) : (
-                        <span
-                          className={`px-2 py-1 rounded text-xs ${
-                            task.status === 'Done'
-                              ? 'bg-green-600'
-                              : task.status === 'InProgress'
-                              ? 'bg-blue-600'
-                              : task.status === 'Confirmed'
-                              ? 'bg-yellow-600'
-                              : task.status === 'IceBox'
-                              ? 'bg-purple-600'
-                              : 'bg-gray-600'
-                          }`}
-                        >
-                          {task.status}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleDuplicateTask(task)}
-                          className="text-green-400 hover:text-green-300 text-sm"
-                        >
-                          複製
-                        </button>
-                        <button
-                          onClick={() => handleDeleteTask(task.id)}
-                          className="text-red-400 hover:text-red-300 text-sm"
-                        >
-                          削除
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                        ))}
+                      </tr>
+                    </SortableContext>
+                  </thead>
+                  <tbody>
+                    {filteredAndSortedTasks.map((task) => (
+                      <TaskRow
+                        key={task.id}
+                        task={task}
+                        columns={columnOrder}
+                        editingCell={editingCell}
+                        editingValue={editingValue}
+                        setEditingValue={setEditingValue}
+                        handleCellClick={handleCellClick}
+                        handleCellSave={handleCellSave}
+                        handleKeyDown={handleKeyDown}
+                        handleDuplicateTask={handleDuplicateTask}
+                        handleDeleteTask={handleDeleteTask}
+                        categories={categories}
+                        subCategories={subCategories}
+                        members={members}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </DndContext>
           </div>
         </div>
         )}
