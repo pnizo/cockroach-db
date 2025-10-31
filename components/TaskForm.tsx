@@ -15,6 +15,8 @@ interface TaskFormProps {
   onClose: () => void;
   onSave: () => void;
   editData?: any | null;
+  initialCategory?: string;
+  initialSubCategory?: string;
 }
 
 const STATUS_OPTIONS = ['ToDo', 'InProgress', 'Confirmed', 'IceBox', 'Done'];
@@ -26,7 +28,7 @@ interface Member {
   role: string | null;
 }
 
-export default function TaskForm({ isOpen, onClose, onSave, editData }: TaskFormProps) {
+export default function TaskForm({ isOpen, onClose, onSave, editData, initialCategory, initialSubCategory }: TaskFormProps) {
   const [formData, setFormData] = useState({
     name: '',
     category: '',
@@ -94,8 +96,8 @@ export default function TaskForm({ isOpen, onClose, onSave, editData }: TaskForm
     } else {
       setFormData({
         name: '',
-        category: '',
-        sub_category: '',
+        category: initialCategory || '',
+        sub_category: initialSubCategory || '',
         start_date: '',
         end_date: '',
         assignee: '',
@@ -104,7 +106,7 @@ export default function TaskForm({ isOpen, onClose, onSave, editData }: TaskForm
       setLocalTaskData(null);
     }
     setError(null);
-  }, [editData, isOpen]);
+  }, [editData, initialCategory, initialSubCategory, isOpen]);
 
   const refreshTaskData = async () => {
     if (!editData?.id) return;

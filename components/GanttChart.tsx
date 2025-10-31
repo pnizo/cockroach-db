@@ -51,6 +51,7 @@ interface Event {
 interface GanttChartProps {
   tasks: Task[];
   onTaskClick: (task: Task) => void;
+  onAddTask?: (category: string, subCategory: string) => void;
   onRefresh: () => void;
 }
 
@@ -226,7 +227,7 @@ function SortableTaskRow({
   );
 }
 
-export default function GanttChart({ tasks, onTaskClick, onRefresh }: GanttChartProps) {
+export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }: GanttChartProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('day');
   const [startDate, setStartDate] = useState<Date>(() => {
     const date = new Date();
@@ -777,6 +778,22 @@ export default function GanttChart({ tasks, onTaskClick, onRefresh }: GanttChart
                         {category}
                       </span>
                       <div className="flex gap-1">
+                        {onAddTask && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              // Get the first subcategory for this category
+                              const firstSubCategory = Object.keys(subCategories)[0] || '';
+                              onAddTask(category, firstSubCategory);
+                            }}
+                            className="text-xs px-2 py-0.5 bg-green-600 hover:bg-green-700 rounded cursor-pointer"
+                            title="タスク追加"
+                          >
+                            ＋
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex gap-1">
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -869,6 +886,20 @@ export default function GanttChart({ tasks, onTaskClick, onRefresh }: GanttChart
                               >
                                 {subCategory}
                               </span>
+                              <div className="flex gap-1">
+                                {onAddTask && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onAddTask(category, subCategory);
+                                    }}
+                                    className="text-xs px-2 py-0.5 bg-green-600 hover:bg-green-700 rounded cursor-pointer"
+                                    title="タスク追加"
+                                  >
+                                    ＋
+                                  </button>
+                                )}
+                              </div>
                               <div className="flex gap-1">
                                 <button
                                   onClick={(e) => {

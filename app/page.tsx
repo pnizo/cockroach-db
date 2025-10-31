@@ -405,6 +405,8 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [isTaskFormOpen, setIsTaskFormOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [initialCategory, setInitialCategory] = useState<string | undefined>(undefined);
+  const [initialSubCategory, setInitialSubCategory] = useState<string | undefined>(undefined);
   const [viewMode, setViewMode] = useState<'gantt' | 'list'>('gantt');
   const [editingCell, setEditingCell] = useState<{ taskId: string; field: string } | null>(null);
   const [editingValue, setEditingValue] = useState<string>('');
@@ -502,11 +504,22 @@ export default function Home() {
 
   const handleAddTask = () => {
     setEditingTask(null);
+    setInitialCategory(undefined);
+    setInitialSubCategory(undefined);
+    setIsTaskFormOpen(true);
+  };
+
+  const handleAddTaskWithCategory = (category: string, subCategory: string) => {
+    setEditingTask(null);
+    setInitialCategory(category);
+    setInitialSubCategory(subCategory);
     setIsTaskFormOpen(true);
   };
 
   const handleEditTask = (task: Task) => {
     setEditingTask(task);
+    setInitialCategory(undefined);
+    setInitialSubCategory(undefined);
     setIsTaskFormOpen(true);
   };
 
@@ -770,6 +783,7 @@ export default function Home() {
           <GanttChart
             tasks={tasks}
             onTaskClick={handleEditTask}
+            onAddTask={handleAddTaskWithCategory}
             onRefresh={fetchTasks}
           />
         )}
@@ -887,6 +901,8 @@ export default function Home() {
           onClose={handleTaskFormClose}
           onSave={fetchTasks}
           editData={editingTask}
+          initialCategory={initialCategory}
+          initialSubCategory={initialSubCategory}
         />
       </div>
     </div>
