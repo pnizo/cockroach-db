@@ -3,6 +3,13 @@
 import { useState, useEffect } from 'react';
 import EventForm from './EventForm';
 
+// Helper function to format date without timezone issues
+const formatDateDisplay = (dateString: string | null): string => {
+  if (!dateString) return '-';
+  const date = new Date(dateString.includes('T') ? dateString : `${dateString}T00:00:00`);
+  return date.toLocaleDateString('ja-JP');
+};
+
 interface TaskFormProps {
   isOpen: boolean;
   onClose: () => void;
@@ -129,6 +136,12 @@ export default function TaskForm({ isOpen, onClose, onSave, editData }: TaskForm
         ? { id: editData.id, ...formData }
         : formData;
 
+      // console.log('=== TaskForm Submit DEBUG ===');
+      // console.log('Method:', method);
+      // console.log('Form start_date:', formData.start_date);
+      // console.log('Form end_date:', formData.end_date);
+      // console.log('Body being sent:', JSON.stringify(body));
+
       const response = await fetch(url, {
         method,
         headers: {
@@ -137,10 +150,18 @@ export default function TaskForm({ isOpen, onClose, onSave, editData }: TaskForm
         body: JSON.stringify(body),
       });
 
+      // console.log('Response status:', response.status);
+
       if (!response.ok) {
         const data = await response.json();
         throw new Error(data.error || '保存に失敗しました');
       }
+
+      const responseData = await response.json();
+      // console.log('Response data:', responseData);
+      // console.log('Returned start_date:', responseData.task?.start_date);
+      // console.log('Returned end_date:', responseData.task?.end_date);
+      // console.log('=== END TaskForm Submit DEBUG ===');
 
       onSave();
       onClose();
@@ -371,7 +392,7 @@ export default function TaskForm({ isOpen, onClose, onSave, editData }: TaskForm
                         <div className="text-sm text-gray-400 mt-1">
                           {event.due_date && (
                             <span className="mr-3">
-                              期日: {new Date(event.due_date).toLocaleDateString('ja-JP')}
+                              期日: {formatDateDisplay(event.due_date)}
                             </span>
                           )}
                           {event.assignee && <span className="mr-3">担当: {event.assignee}</span>}

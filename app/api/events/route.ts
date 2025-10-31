@@ -9,11 +9,11 @@ export async function GET(request: Request) {
     let events;
     if (taskId) {
       events = await query(
-        'SELECT * FROM event WHERE task_id = $1 ORDER BY due_date',
+        'SELECT id, name, task_id, due_date::DATE::TEXT as due_date, assignee, status, created_at, updated_at FROM event WHERE task_id = $1 ORDER BY due_date',
         [taskId]
       );
     } else {
-      events = await query('SELECT * FROM event ORDER BY due_date');
+      events = await query('SELECT id, name, task_id, due_date::DATE::TEXT as due_date, assignee, status, created_at, updated_at FROM event ORDER BY due_date');
     }
 
     return NextResponse.json({ events });
@@ -38,14 +38,14 @@ export async function POST(request: Request) {
       );
     }
 
-    // Convert empty strings to null for nullable fields
-    const sanitizedDueDate = due_date === '' ? null : due_date || null;
+    // Convert empty strings to null for nullable fields, and extract date part only
+    const sanitizedDueDate = due_date === '' ? null : (due_date ? due_date.split('T')[0] : null);
     const sanitizedAssignee = assignee === '' ? null : assignee || null;
 
     const result = await query(
       `INSERT INTO event (name, task_id, due_date, assignee, status)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING *`,
+       VALUES ($1, $2, $3::DATE, $4, $5)
+       RETURNING id, name, task_id, due_date::DATE::TEXT as due_date, assignee, status, created_at, updated_at`,
       [name, task_id, sanitizedDueDate, sanitizedAssignee, status || 'ToDo']
     );
 
@@ -71,20 +71,20 @@ export async function PUT(request: Request) {
       );
     }
 
-    // Convert empty strings to null for nullable fields
-    const sanitizedDueDate = due_date === '' ? null : due_date;
+    // Convert empty strings to null for nullable fields, and extract date part only
+    const sanitizedDueDate = due_date === '' ? null : (due_date ? due_date.split('T')[0] : null);
     const sanitizedAssignee = assignee === '' ? null : assignee;
 
     const result = await query(
       `UPDATE event
        SET name = COALESCE($1, name),
            task_id = COALESCE($2, task_id),
-           due_date = $3,
+           due_date = $3::DATE,
            assignee = $4,
            status = COALESCE($5, status),
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $6
-       RETURNING *`,
+       RETURNING id, name, task_id, due_date::DATE::TEXT as due_date, assignee, status, created_at, updated_at`,
       [name, task_id, sanitizedDueDate, sanitizedAssignee, status, id]
     );
 
