@@ -69,6 +69,7 @@ interface SortableTaskRowProps {
   getStatusColor: (status: string) => string;
   getEventColor: (status: string) => { bg: string; hover: string; border: string };
   handleEventClick: (event: Event) => void;
+  handleAddEvent: (taskId: string, date: string) => void;
 }
 
 function SortableTaskRow({
@@ -80,6 +81,7 @@ function SortableTaskRow({
   getStatusColor,
   getEventColor,
   handleEventClick,
+  handleAddEvent,
 }: SortableTaskRowProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
@@ -144,10 +146,37 @@ function SortableTaskRow({
               transform: 'translateY(-50%)',
               zIndex: 10,
             }}
-            onClick={() => onTaskClick(task)}
+            onClick={(e) => {
+              e.stopPropagation();
+              // Calculate the clicked position relative to the timeline
+              const rect = e.currentTarget.parentElement!.getBoundingClientRect();
+              const clickX = e.clientX - rect.left;
+              const clickPercent = clickX / rect.width;
+
+              // Calculate the date at the clicked position
+              const chartStart = timelineDates[0];
+              const chartEnd = timelineDates[timelineDates.length - 1];
+              const totalDuration = chartEnd.getTime() - chartStart.getTime();
+              const clickedTime = chartStart.getTime() + (totalDuration * clickPercent);
+              const clickedDate = new Date(clickedTime);
+
+              // Format date as YYYY-MM-DD
+              const dateStr = clickedDate.toISOString().split('T')[0];
+
+              // Open event add dialog with the clicked date
+              handleAddEvent(task.id, dateStr);
+            }}
             title={`${task.name} (${task.status})`}
           >
-            <div className="text-xs text-white px-2 py-1 truncate">{task.name}</div>
+            <div
+              className="text-xs text-white px-2 py-1 truncate"
+              onClick={(e) => {
+                e.stopPropagation();
+                onTaskClick(task);
+              }}
+            >
+              {task.name}
+            </div>
           </div>
         )}
         {/* Event markers with balloons */}
@@ -925,6 +954,7 @@ export default function GanttChart({ tasks, onTaskClick, onRefresh }: GanttChart
                                 getStatusColor={getStatusColor}
                                 getEventColor={getEventColor}
                                 handleEventClick={handleEventClick}
+                                handleAddEvent={handleAddEvent}
                               />
                             );
                           })}
@@ -950,6 +980,7 @@ export default function GanttChart({ tasks, onTaskClick, onRefresh }: GanttChart
           onSave={onRefresh}
           taskId={selectedTaskId || undefined}
           editData={selectedEvent}
+          selectedDate={selectedDate}
         />
       </div>
     </DndContext>

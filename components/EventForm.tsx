@@ -8,6 +8,7 @@ interface EventFormProps {
   onSave: () => void;
   taskId?: string;
   editData?: any | null;
+  selectedDate?: string | null;
 }
 
 const STATUS_OPTIONS = ['ToDo', 'InProgress', 'Confirmed', 'IceBox', 'Done'];
@@ -19,7 +20,7 @@ interface Member {
   role: string | null;
 }
 
-export default function EventForm({ isOpen, onClose, onSave, taskId, editData }: EventFormProps) {
+export default function EventForm({ isOpen, onClose, onSave, taskId, editData, selectedDate }: EventFormProps) {
   const [formData, setFormData] = useState({
     name: '',
     task_id: taskId || '',
@@ -63,13 +64,13 @@ export default function EventForm({ isOpen, onClose, onSave, taskId, editData }:
       setFormData({
         name: '',
         task_id: taskId || '',
-        due_date: '',
+        due_date: selectedDate || '',
         assignee: '',
         status: 'ToDo',
       });
     }
     setError(null);
-  }, [editData, taskId, isOpen]);
+  }, [editData, taskId, selectedDate, isOpen]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
