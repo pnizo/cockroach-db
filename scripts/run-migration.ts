@@ -18,19 +18,19 @@ async function runMigration() {
     await pool.query(sql);
     console.log('Migration completed successfully!');
 
-    // Insert sample member data
-    console.log('Inserting sample member data...');
-    await pool.query(`
-      INSERT INTO member (name, email, role, is_active)
-      VALUES
-        ('山田太郎', 'yamada@example.com', 'バックエンドエンジニア', true),
-        ('佐藤花子', 'sato@example.com', 'フロントエンドエンジニア', true),
-        ('鈴木一郎', 'suzuki@example.com', 'プロジェクトマネージャー', true),
-        ('田中美咲', 'tanaka@example.com', 'デザイナー', true),
-        ('高橋健太', 'takahashi@example.com', 'QAエンジニア', true)
-    `);
+    // // Insert sample member data
+    // console.log('Inserting sample member data...');
+    // await pool.query(`
+    //   INSERT INTO member (name, email, role, is_active)
+    //   VALUES
+    //     ('山田太郎', 'yamada@example.com', 'バックエンドエンジニア', true),
+    //     ('佐藤花子', 'sato@example.com', 'フロントエンドエンジニア', true),
+    //     ('鈴木一郎', 'suzuki@example.com', 'プロジェクトマネージャー', true),
+    //     ('田中美咲', 'tanaka@example.com', 'デザイナー', true),
+    //     ('高橋健太', 'takahashi@example.com', 'QAエンジニア', true)
+    // `);
 
-    console.log('Sample data inserted successfully!');
+    // console.log('Sample data inserted successfully!');
 
   } catch (error) {
     console.error('Migration failed:', error);
