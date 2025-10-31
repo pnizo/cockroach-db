@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   // Get authentication credentials from environment variables
   const BASIC_AUTH_USER = process.env.BASIC_AUTH_USER || 'admin';
   const BASIC_AUTH_PASSWORD = process.env.BASIC_AUTH_PASSWORD || 'password';
