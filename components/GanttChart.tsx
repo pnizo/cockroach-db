@@ -181,9 +181,9 @@ function SortableTaskRow({
               onMouseLeave={handleMouseLeave}
               onClick={(e) => {
                 // Check if this was a click (not a drag)
-                if (draggingTask && draggingTask.taskId === task.id) {
-                  const timeDiff = Date.now() - draggingTask.mouseDownTime;
-                  const distanceMoved = Math.abs(e.clientX - draggingTask.mouseDownX);
+                if (mouseDownInfo && mouseDownInfo.taskId === task.id) {
+                  const timeDiff = Date.now() - mouseDownInfo.mouseDownTime;
+                  const distanceMoved = Math.abs(e.clientX - mouseDownInfo.mouseDownX);
 
                   // If mouse didn't move much and time was short, treat as click
                   if (timeDiff < 300 && distanceMoved < 5) {
@@ -207,6 +207,9 @@ function SortableTaskRow({
                     // Open event add dialog with the clicked date
                     handleAddEvent(task.id, dateStr);
                   }
+
+                  // Clear mouseDownInfo after processing
+                  setMouseDownInfo(null);
                 }
               }}
               title={`${task.name} (${task.status})`}
@@ -359,6 +362,11 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
     mouseDownTime: number;
   } | null>(null);
   const [tempDates, setTempDates] = useState<{ startDate: Date; endDate: Date } | null>(null);
+  const [mouseDownInfo, setMouseDownInfo] = useState<{
+    taskId: string;
+    mouseDownX: number;
+    mouseDownTime: number;
+  } | null>(null);
 
   // Sync local tasks with props
   useEffect(() => {
@@ -712,6 +720,14 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
       mode = 'move';
     }
 
+    const mouseDownTime = Date.now();
+
+    setMouseDownInfo({
+      taskId: task.id,
+      mouseDownX: e.clientX,
+      mouseDownTime,
+    });
+
     setDraggingTask({
       taskId: task.id,
       mode,
@@ -719,7 +735,7 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
       initialStartDate: parseDateString(task.start_date),
       initialEndDate: parseDateString(task.end_date),
       mouseDownX: e.clientX,
-      mouseDownTime: Date.now(),
+      mouseDownTime,
     });
 
     setTempDates({
@@ -773,27 +789,6 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
   const handleTaskBarMouseUp = async (e: MouseEvent) => {
     if (!draggingTask) return;
 
-    const moveDistance = Math.abs(e.clientX - draggingTask.mouseDownX);
-
-    // If movement is less than 5px, treat it as a click
-    if (moveDistance < 5 && tempDates) {
-      const rect = (e.target as HTMLElement).getBoundingClientRect();
-      const clickX = draggingTask.mouseDownX - rect.left;
-      const clickPercent = clickX / rect.width;
-
-      const chartStart = timelineDates[0];
-      const chartEnd = timelineDates[timelineDates.length - 1];
-      const totalDuration = chartEnd.getTime() - chartStart.getTime();
-      const clickedTime = chartStart.getTime() + (totalDuration * clickPercent);
-      const clickedDate = new Date(clickedTime);
-      const dateStr = clickedDate.toISOString().split('T')[0];
-
-      handleAddEvent(draggingTask.taskId, dateStr);
-      setDraggingTask(null);
-      setTempDates(null);
-      return;
-    }
-
     // Update task dates via API
     if (tempDates) {
       try {
@@ -817,6 +812,7 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
 
     setDraggingTask(null);
     setTempDates(null);
+    setMouseDownInfo(null);
   };
 
   // Set up global mouse event listeners for dragging
