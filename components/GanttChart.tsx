@@ -55,7 +55,13 @@ interface GanttChartProps {
   onRefresh: () => void;
 }
 
-type ViewMode = 'month' | 'week' | 'day';
+type ViewMode = 'week' | 'day';
+
+// Timeline display constants
+const CELL_WIDTH_DAY = 30;
+const CELL_WIDTH_WEEK = 30;
+const TIMELINE_UNITS = 120;
+const TIMELINE_PADDING = 8; // p-2 = 0.5rem = 8px
 
 const STORAGE_KEY_CATEGORIES = 'gantt_expanded_categories';
 const STORAGE_KEY_SUBCATEGORIES = 'gantt_expanded_subcategories';
@@ -71,9 +77,11 @@ interface SortableTaskRowProps {
   getEventColor: (status: string) => { bg: string; hover: string; border: string };
   handleEventClick: (event: Event) => void;
   handleAddEvent: (taskId: string, date: string) => void;
-  handleTaskBarMouseDown: (e: React.MouseEvent, task: Task, barElement: HTMLElement) => void;
-  draggingTaskId: string | null;
-  tempDates: { startDate: Date; endDate: Date } | null;
+  mouseDownInfo: { taskId: string; mouseDownX: number; mouseDownTime: number } | null;
+  setMouseDownInfo: (info: { taskId: string; mouseDownX: number; mouseDownTime: number } | null) => void;
+  timelineWidth: number;
+  cellWidth: number;
+  unitInMs: number;
 }
 
 function SortableTaskRow({
@@ -86,33 +94,15 @@ function SortableTaskRow({
   getEventColor,
   handleEventClick,
   handleAddEvent,
-  handleTaskBarMouseDown,
-  draggingTaskId,
-  tempDates,
+  mouseDownInfo,
+  setMouseDownInfo,
+  timelineWidth,
+  cellWidth,
+  unitInMs,
 }: SortableTaskRowProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
   });
-
-  const [cursorType, setCursorType] = useState<'grab' | 'ew-resize' | 'default'>('default');
-
-  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!position || draggingTaskId) return;
-
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const width = rect.width;
-
-    if (x < 10 || x > width - 10) {
-      setCursorType('ew-resize');
-    } else {
-      setCursorType('grab');
-    }
-  };
-
-  const handleMouseLeave = () => {
-    setCursorType('default');
-  };
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -124,10 +114,10 @@ function SortableTaskRow({
     <div
       ref={setNodeRef}
       style={style}
-      className="flex border-b border-gray-700 hover:bg-gray-750"
+      className="flex border-b border-gray-700 hover:bg-gray-700 group"
     >
       <div
-        className="w-64 flex-shrink-0 p-2 pl-10 text-gray-300 flex items-center"
+        className="w-64 flex-shrink-0 p-2 pl-10 text-gray-300 flex items-center sticky left-0 bg-gray-800 group-hover:bg-gray-700 z-20"
       >
         <span
           className="mr-2 text-gray-500 cursor-move"
@@ -143,21 +133,13 @@ function SortableTaskRow({
           {task.name}
         </span>
       </div>
-      <div className="flex-1 flex relative p-2">
+      <div className="flex relative p-2" style={{ width: `${timelineWidth}px` }}>
         {timelineDates.map((date, index) => {
-          const today = new Date();
-          const isToday = viewMode === 'day'
-            ? date.toDateString() === today.toDateString()
-            : viewMode === 'week'
-            ? date <= today && new Date(date.getTime() + 7 * 24 * 60 * 60 * 1000) > today
-            : date.getMonth() === today.getMonth() && date.getFullYear() === today.getFullYear();
-
           return (
             <div
               key={index}
-              className={`flex-1 border-l border-gray-700 ${
-                isToday ? 'bg-cyan-500/70' : ''
-              }`}
+              className="border-l border-gray-700"
+              style={{ width: `${cellWidth}px` }}
             />
           );
         })}
@@ -167,20 +149,24 @@ function SortableTaskRow({
             <div
               className={`absolute h-6 rounded ${getStatusColor(
                 task.status
-              )} ${draggingTaskId === task.id ? 'opacity-50' : 'opacity-80 hover:opacity-100'} pointer-events-auto`}
+              )} opacity-80 hover:opacity-100 pointer-events-auto cursor-pointer`}
               style={{
                 left: position.left,
                 width: position.width,
                 top: '50%',
                 transform: 'translateY(-50%)',
                 zIndex: 10,
-                cursor: draggingTaskId === task.id ? 'grabbing' : cursorType,
               }}
-              onMouseDown={(e) => handleTaskBarMouseDown(e, task, e.currentTarget)}
-              onMouseMove={handleMouseMove}
-              onMouseLeave={handleMouseLeave}
-              onClick={(e) => {
-                e.stopPropagation(); // Always stop propagation to prevent task edit dialog
+              onMouseDown={(e) => {
+                e.stopPropagation();
+                setMouseDownInfo({
+                  taskId: task.id,
+                  mouseDownX: e.clientX,
+                  mouseDownTime: Date.now(),
+                });
+              }}
+              onMouseUp={(e) => {
+                e.stopPropagation();
 
                 // Check if this was a click (not a drag)
                 if (mouseDownInfo && mouseDownInfo.taskId === task.id) {
@@ -189,86 +175,70 @@ function SortableTaskRow({
 
                   // If mouse didn't move much and time was short, treat as click
                   if (timeDiff < 300 && distanceMoved < 5) {
-                    // Calculate clicked position relative to task bar
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const clickX = e.clientX - rect.left;
-                    const clickPercent = clickX / rect.width;
+                    // Calculate clicked position in timeline
+                    const container = e.currentTarget.parentElement;
+                    if (container) {
+                      const containerRect = container.getBoundingClientRect();
+                      const clickX = e.clientX - containerRect.left;
 
-                    // Calculate date based on task's start and end dates
-                    const taskStart = position.start;
-                    const taskEnd = position.end;
-                    const taskDuration = taskEnd.getTime() - taskStart.getTime();
-                    const clickedTime = taskStart.getTime() + (taskDuration * clickPercent);
-                    const clickedDate = new Date(clickedTime);
+                      // Calculate which unit was clicked
+                      const clickedUnit = Math.floor(clickX / cellWidth);
 
-                    // Format date as YYYY-MM-DD
-                    const dateStr = clickedDate.toISOString().split('T')[0];
+                      // Calculate the date (without the +1 shift)
+                      const chartStart = timelineDates[0];
+                      const clickedDate = new Date(chartStart);
+                      if (viewMode === 'day') {
+                        clickedDate.setDate(chartStart.getDate() + clickedUnit);
+                      } else {
+                        clickedDate.setDate(chartStart.getDate() + clickedUnit * 7);
+                      }
 
-                    // Open event add dialog with the clicked date
-                    handleAddEvent(task.id, dateStr);
+                      // Format date as YYYY-MM-DD
+                      const dateStr = clickedDate.toISOString().split('T')[0];
+
+                      // Clear mouse down info
+                      setMouseDownInfo(null);
+
+                      // Open event add dialog with the clicked date
+                      handleAddEvent(task.id, dateStr);
+                    }
                   }
-
-                  // Clear mouseDownInfo after processing
-                  setMouseDownInfo(null);
                 }
+              }}
+              onClick={(e) => {
+                e.stopPropagation(); // Prevent task edit dialog
               }}
               title={`${task.name} (${task.status})`}
             >
-              <div
-                className="text-xs text-white px-2 py-1 truncate pointer-events-auto cursor-pointer"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onTaskClick(task);
-                }}
-              >
+              <div className="text-xs text-white px-2 py-1 truncate pointer-events-none">
                 {task.name}
               </div>
             </div>
-
-            {/* Temporary bar during dragging */}
-            {draggingTaskId === task.id && tempDates && (
-              (() => {
-                const chartStart = timelineDates[0];
-                const chartEnd = timelineDates[timelineDates.length - 1];
-                const totalDuration = chartEnd.getTime() - chartStart.getTime();
-
-                const tempStartPercent = ((tempDates.startDate.getTime() - chartStart.getTime()) / totalDuration) * 100;
-                const tempEndPercent = ((tempDates.endDate.getTime() - chartStart.getTime()) / totalDuration) * 100;
-                const tempWidth = tempEndPercent - tempStartPercent;
-
-                return (
-                  <div
-                    className={`absolute h-6 rounded ${getStatusColor(
-                      task.status
-                    )} opacity-100 pointer-events-none border-2 border-white`}
-                    style={{
-                      left: `${tempStartPercent}%`,
-                      width: `${tempWidth}%`,
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      zIndex: 20,
-                    }}
-                  >
-                    <div className="text-xs text-white px-2 py-1 truncate">
-                      {task.name}
-                    </div>
-                  </div>
-                );
-              })()
-            )}
           </>
         )}
         {/* Event markers with balloons */}
         {task.events.map((event, eventIndex) => {
           if (!event.due_date) return null;
           const eventDate = parseDateString(event.due_date);
-          const chartStart = timelineDates[0];
-          const chartEnd = timelineDates[timelineDates.length - 1];
-          const totalDuration = chartEnd.getTime() - chartStart.getTime();
-          const eventPos =
-            ((eventDate.getTime() - chartStart.getTime()) / totalDuration) * 100;
 
-          if (eventPos < 0 || eventPos > 100) return null;
+          // Find which timeline cell this event falls in
+          let eventCellIndex = -1;
+          for (let i = 0; i < timelineDates.length; i++) {
+            const cellDate = timelineDates[i];
+            const nextCellDate = i < timelineDates.length - 1
+              ? timelineDates[i + 1]
+              : new Date(cellDate.getTime() + unitInMs);
+
+            if (eventDate >= cellDate && eventDate < nextCellDate) {
+              eventCellIndex = i;
+              break;
+            }
+          }
+
+          if (eventCellIndex === -1) return null; // Event is outside visible range
+
+          // Calculate position using fixed cell width (add +1 for shift, center in cell)
+          const eventPos = (eventCellIndex + 1) * cellWidth + (cellWidth / 2);
 
           const eventColor = getEventColor(event.status);
 
@@ -277,10 +247,10 @@ function SortableTaskRow({
               key={event.id}
               className="absolute cursor-pointer group"
               style={{
-                left: `${eventPos}%`,
+                left: `${eventPos + TIMELINE_PADDING}px`,
                 top: '50%',
                 transform: 'translate(-50%, -50%)',
-                zIndex: 30,
+                zIndex: 12,
               }}
               onClick={(e) => {
                 e.stopPropagation();
@@ -351,17 +321,7 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
   const [categoryOrders, setCategoryOrders] = useState<Record<string, number>>({});
   const [subCategoryOrders, setSubCategoryOrders] = useState<Record<string, number>>({});
 
-  // Drag state for task bars
-  const [draggingTask, setDraggingTask] = useState<{
-    taskId: string;
-    mode: 'move' | 'resize-left' | 'resize-right';
-    initialX: number;
-    initialStartDate: Date;
-    initialEndDate: Date;
-    mouseDownX: number;
-    mouseDownTime: number;
-  } | null>(null);
-  const [tempDates, setTempDates] = useState<{ startDate: Date; endDate: Date } | null>(null);
+  // Click detection for task bars
   const [mouseDownInfo, setMouseDownInfo] = useState<{
     taskId: string;
     mouseDownX: number;
@@ -478,30 +438,56 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
     });
   };
 
-  // Generate timeline dates
+  // Generate timeline dates - Fixed 120 units
   const timelineDates = useMemo(() => {
     const dates: Date[] = [];
-    const end = new Date(startDate);
 
-    if (viewMode === 'month') {
-      end.setMonth(end.getMonth() + 12);
-      for (let d = new Date(startDate); d < end; d.setMonth(d.getMonth() + 1)) {
-        dates.push(new Date(d));
-      }
-    } else if (viewMode === 'week') {
-      end.setDate(end.getDate() + 84); // 12 weeks
-      for (let d = new Date(startDate); d < end; d.setDate(d.getDate() + 7)) {
-        dates.push(new Date(d));
+    if (viewMode === 'week') {
+      // 120 weeks
+      for (let i = 0; i < TIMELINE_UNITS; i++) {
+        const d = new Date(startDate);
+        d.setDate(d.getDate() + i * 7);
+        dates.push(d);
       }
     } else {
-      end.setDate(end.getDate() + 90); // 90 days
-      for (let d = new Date(startDate); d < end; d.setDate(d.getDate() + 1)) {
-        dates.push(new Date(d));
+      // 120 days
+      for (let i = 0; i < TIMELINE_UNITS; i++) {
+        const d = new Date(startDate);
+        d.setDate(d.getDate() + i);
+        dates.push(d);
       }
     }
 
     return dates;
   }, [startDate, viewMode]);
+
+  // Calculate timeline width and cell width
+  const timelineWidth = useMemo(() => {
+    return viewMode === 'day'
+      ? TIMELINE_UNITS * CELL_WIDTH_DAY  // 4800px
+      : TIMELINE_UNITS * CELL_WIDTH_WEEK; // 7200px
+  }, [viewMode]);
+
+  const cellWidth = viewMode === 'day' ? CELL_WIDTH_DAY : CELL_WIDTH_WEEK;
+  const unitInMs = viewMode === 'day'
+    ? 24 * 60 * 60 * 1000  // 1 day in milliseconds
+    : 7 * 24 * 60 * 60 * 1000; // 1 week in milliseconds
+
+  // Calculate today's position for the vertical bar
+  const todayPosition = useMemo(() => {
+    const today = new Date();
+    const todayIndex = timelineDates.findIndex(date => {
+      if (viewMode === 'day') {
+        return date.toDateString() === today.toDateString();
+      } else {
+        return date <= today && new Date(date.getTime() + 7 * 24 * 60 * 60 * 1000) > today;
+      }
+    });
+
+    if (todayIndex === -1) return null;
+
+    return 256 + todayIndex * (cellWidth - 0.14); // 256px = fixed column width
+  }, [timelineDates, viewMode, cellWidth]);
 
   const toggleCategory = (category: string) => {
     const newExpanded = new Set(expandedCategories);
@@ -581,21 +567,51 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
 
     if (!taskStart || !taskEnd) return null;
 
-    const chartStart = timelineDates[0];
-    const chartEnd = timelineDates[timelineDates.length - 1];
-    const totalDuration = chartEnd.getTime() - chartStart.getTime();
+    // Find which timeline cell the task starts and ends in
+    let startCellIndex = -1;
+    let endCellIndex = -1;
 
-    // Clip task dates to chart range
-    const clippedStart = new Date(Math.max(taskStart.getTime(), chartStart.getTime()));
-    const clippedEnd = new Date(Math.min(taskEnd.getTime(), chartEnd.getTime()));
+    for (let i = 0; i < timelineDates.length; i++) {
+      const cellDate = timelineDates[i];
+      const nextCellDate = i < timelineDates.length - 1
+        ? timelineDates[i + 1]
+        : new Date(cellDate.getTime() + unitInMs);
 
-    // Calculate position based on clipped dates
-    const leftPercent = ((clippedStart.getTime() - chartStart.getTime()) / totalDuration) * 100;
-    const widthPercent = ((clippedEnd.getTime() - clippedStart.getTime()) / totalDuration) * 100;
+      // Check if taskStart falls in this cell
+      if (startCellIndex === -1 && taskStart >= cellDate && taskStart < nextCellDate) {
+        startCellIndex = i;
+      }
+
+      // Check if taskEnd falls in this cell (inclusive of the cell date)
+      if (endCellIndex === -1 && taskEnd >= cellDate && taskEnd < nextCellDate) {
+        endCellIndex = i;
+      }
+    }
+
+    // If task is completely before visible range
+    if (startCellIndex === -1 && taskEnd < timelineDates[0]) return null;
+
+    // If task starts before visible range, clip to start
+    if (startCellIndex === -1) startCellIndex = -1; // Will be clipped to 0 later
+
+    // If task ends after visible range, clip to end
+    if (endCellIndex === -1 && taskEnd >= timelineDates[0]) {
+      endCellIndex = timelineDates.length - 1;
+    }
+
+    // Calculate position using fixed cell width (add +1 for shift)
+    const leftPx = (startCellIndex + 1) * (cellWidth - 0.14);
+    const widthInCells = endCellIndex - startCellIndex + 1;
+    let widthPx = widthInCells * (cellWidth - 0.14);
+
+    // If the bar starts before the visible area, adjust the width
+    if (leftPx < 0) {
+      widthPx = widthPx + leftPx; // leftPx is negative, so this subtracts from width
+    }
 
     return {
-      left: `${Math.max(0, leftPercent)}%`,
-      width: `${Math.max(1, widthPercent)}%`,
+      left: `${Math.max(0, leftPx) + TIMELINE_PADDING}px`,
+      width: `${Math.max(cellWidth, widthPx)}px`,
       start: taskStart,
       end: taskEnd,
     };
@@ -626,21 +642,51 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
     const categoryStart = new Date(Math.min(...allDates.map(d => d.getTime())));
     const categoryEnd = new Date(Math.max(...allDates.map(d => d.getTime())));
 
-    const chartStart = timelineDates[0];
-    const chartEnd = timelineDates[timelineDates.length - 1];
-    const totalDuration = chartEnd.getTime() - chartStart.getTime();
+    // Find which timeline cell the category starts and ends in
+    let startCellIndex = -1;
+    let endCellIndex = -1;
 
-    // Clip category dates to chart range
-    const clippedStart = new Date(Math.max(categoryStart.getTime(), chartStart.getTime()));
-    const clippedEnd = new Date(Math.min(categoryEnd.getTime(), chartEnd.getTime()));
+    for (let i = 0; i < timelineDates.length; i++) {
+      const cellDate = timelineDates[i];
+      const nextCellDate = i < timelineDates.length - 1
+        ? timelineDates[i + 1]
+        : new Date(cellDate.getTime() + unitInMs);
 
-    // Calculate position based on clipped dates
-    const leftPercent = ((clippedStart.getTime() - chartStart.getTime()) / totalDuration) * 100;
-    const widthPercent = ((clippedEnd.getTime() - clippedStart.getTime()) / totalDuration) * 100;
+      // Check if categoryStart falls in this cell
+      if (startCellIndex === -1 && categoryStart >= cellDate && categoryStart < nextCellDate) {
+        startCellIndex = i;
+      }
+
+      // Check if categoryEnd falls in this cell
+      if (endCellIndex === -1 && categoryEnd >= cellDate && categoryEnd < nextCellDate) {
+        endCellIndex = i;
+      }
+    }
+
+    // If category is completely before visible range
+    if (startCellIndex === -1 && categoryEnd < timelineDates[0]) return null;
+
+    // If category starts before visible range, clip to start
+    if (startCellIndex === -1) startCellIndex = -1; // Will be clipped to 0 later
+
+    // If category ends after visible range, clip to end
+    if (endCellIndex === -1 && categoryEnd >= timelineDates[0]) {
+      endCellIndex = timelineDates.length - 1;
+    }
+
+    // Calculate position using fixed cell width (add +1 for shift)
+    const leftPx = (startCellIndex + 1) * (cellWidth - 0.14);
+    const widthInCells = endCellIndex - startCellIndex + 1;
+    let widthPx = widthInCells * (cellWidth - 0.14);
+
+    // If the bar starts before the visible area, adjust the width
+    if (leftPx < 0) {
+      widthPx = widthPx + leftPx; // leftPx is negative, so this subtracts from width
+    }
 
     return {
-      left: `${Math.max(0, leftPercent)}%`,
-      width: `${Math.max(1, widthPercent)}%`,
+      left: `${Math.max(0, leftPx) + TIMELINE_PADDING}px`,
+      width: `${Math.max(cellWidth, widthPx)}px`,
       start: categoryStart,
       end: categoryEnd,
     };
@@ -680,13 +726,7 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
   };
 
   const formatDate = (date: Date) => {
-    if (viewMode === 'month') {
-      return `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}`;
-    } else if (viewMode === 'week') {
-      return `${date.getMonth() + 1}/${date.getDate()}`;
-    } else {
-      return `${date.getMonth() + 1}/${date.getDate()}`;
-    }
+    return `${date.getMonth() + 1}/${date.getDate()}`;
   };
 
   const handleAddEvent = (taskId: string, date: string) => {
@@ -694,138 +734,6 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
     setSelectedDate(date);
     setIsEventFormOpen(true);
   };
-
-  // Task bar drag handlers
-  const handleTaskBarMouseDown = (
-    e: React.MouseEvent,
-    task: Task,
-    barElement: HTMLElement
-  ) => {
-    if (!task.start_date || !task.end_date) return;
-
-    e.stopPropagation();
-    e.preventDefault();
-
-    const rect = barElement.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const barWidth = rect.width;
-
-    // Determine drag mode based on click position (10px from edges)
-    let mode: 'move' | 'resize-left' | 'resize-right';
-    if (clickX < 10) {
-      mode = 'resize-left';
-    } else if (clickX > barWidth - 10) {
-      mode = 'resize-right';
-    } else {
-      mode = 'move';
-    }
-
-    const mouseDownTime = Date.now();
-
-    setMouseDownInfo({
-      taskId: task.id,
-      mouseDownX: e.clientX,
-      mouseDownTime,
-    });
-
-    setDraggingTask({
-      taskId: task.id,
-      mode,
-      initialX: e.clientX,
-      initialStartDate: parseDateString(task.start_date),
-      initialEndDate: parseDateString(task.end_date),
-      mouseDownX: e.clientX,
-      mouseDownTime,
-    });
-
-    setTempDates({
-      startDate: parseDateString(task.start_date),
-      endDate: parseDateString(task.end_date),
-    });
-  };
-
-  const handleTaskBarMouseMove = (e: MouseEvent) => {
-    if (!draggingTask) return;
-
-    const timelineElement = document.querySelector('.flex-1.flex.relative.p-2');
-    if (!timelineElement) return;
-
-    const rect = timelineElement.getBoundingClientRect();
-    const deltaX = e.clientX - draggingTask.initialX;
-    const timelineWidth = rect.width;
-
-    // Calculate date change based on pixel movement
-    const chartStart = timelineDates[0];
-    const chartEnd = timelineDates[timelineDates.length - 1];
-    const totalDuration = chartEnd.getTime() - chartStart.getTime();
-    const deltaTime = (deltaX / timelineWidth) * totalDuration;
-
-    let newStartDate = new Date(draggingTask.initialStartDate);
-    let newEndDate = new Date(draggingTask.initialEndDate);
-
-    if (draggingTask.mode === 'move') {
-      // Move entire bar
-      newStartDate = new Date(draggingTask.initialStartDate.getTime() + deltaTime);
-      newEndDate = new Date(draggingTask.initialEndDate.getTime() + deltaTime);
-    } else if (draggingTask.mode === 'resize-left') {
-      // Resize from left (change start date)
-      newStartDate = new Date(draggingTask.initialStartDate.getTime() + deltaTime);
-      // Ensure start date doesn't exceed end date
-      if (newStartDate >= draggingTask.initialEndDate) {
-        newStartDate = new Date(draggingTask.initialEndDate.getTime() - 24 * 60 * 60 * 1000);
-      }
-    } else if (draggingTask.mode === 'resize-right') {
-      // Resize from right (change end date)
-      newEndDate = new Date(draggingTask.initialEndDate.getTime() + deltaTime);
-      // Ensure end date doesn't precede start date
-      if (newEndDate <= draggingTask.initialStartDate) {
-        newEndDate = new Date(draggingTask.initialStartDate.getTime() + 24 * 60 * 60 * 1000);
-      }
-    }
-
-    setTempDates({ startDate: newStartDate, endDate: newEndDate });
-  };
-
-  const handleTaskBarMouseUp = async (e: MouseEvent) => {
-    if (!draggingTask) return;
-
-    // Update task dates via API
-    if (tempDates) {
-      try {
-        const response = await fetch('/api/tasks', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: draggingTask.taskId,
-            start_date: tempDates.startDate.toISOString().split('T')[0],
-            end_date: tempDates.endDate.toISOString().split('T')[0],
-          }),
-        });
-
-        if (response.ok) {
-          onRefresh();
-        }
-      } catch (error) {
-        console.error('Failed to update task dates:', error);
-      }
-    }
-
-    setDraggingTask(null);
-    setTempDates(null);
-    setMouseDownInfo(null);
-  };
-
-  // Set up global mouse event listeners for dragging
-  useEffect(() => {
-    if (draggingTask) {
-      window.addEventListener('mousemove', handleTaskBarMouseMove);
-      window.addEventListener('mouseup', handleTaskBarMouseUp);
-      return () => {
-        window.removeEventListener('mousemove', handleTaskBarMouseMove);
-        window.removeEventListener('mouseup', handleTaskBarMouseUp);
-      };
-    }
-  }, [draggingTask, tempDates, timelineDates]);
 
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
@@ -902,7 +810,6 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
       <div className="bg-gray-800 rounded-lg p-4">
         <div className="mb-4 flex justify-between items-center">
-          <h2 className="text-2xl font-bold text-white">ガントチャート</h2>
           <div className="flex gap-2">
             <button
               onClick={() => setViewMode('day')}
@@ -920,14 +827,6 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
             >
               週
             </button>
-            <button
-              onClick={() => setViewMode('month')}
-              className={`px-3 py-1 rounded ${
-                viewMode === 'month' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300'
-              }`}
-            >
-              月
-            </button>
             <input
               type="date"
               value={startDate.toISOString().split('T')[0]}
@@ -937,30 +836,38 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <div className="min-w-[800px]">
+        <div className="overflow-x-auto overflow-y-auto max-h-[600px]">
+          <div className="relative" style={{ width: `${timelineWidth + 256}px` }}>
+            {/* Today vertical bar */}
+            {todayPosition !== null && (
+              <div
+                className="absolute top-0 bottom-0 bg-cyan-500/30 pointer-events-none"
+                style={{
+                  left: `${todayPosition + TIMELINE_PADDING}px`,
+                  width: `${cellWidth}px`,
+                  zIndex: 15,
+                }}
+              />
+            )}
             {/* Timeline header */}
-            <div className="flex border-b border-gray-700">
-              <div className="w-64 flex-shrink-0 p-2 font-bold text-gray-300">タスク</div>
-              <div className="flex-1 flex relative p-2">
+            <div className="flex border-b border-gray-700 sticky top-0 bg-gray-800 z-30">
+              <div className="w-64 flex-shrink-0 p-2 font-bold text-gray-300 sticky left-0 bg-gray-800 z-30">タスク</div>
+              <div className="flex relative p-2" style={{ width: `${timelineWidth}px` }}>
                 {timelineDates.map((date, index) => {
                   const today = new Date();
                   const isToday = viewMode === 'day'
                     ? date.toDateString() === today.toDateString()
-                    : viewMode === 'week'
-                    ? date <= today && new Date(date.getTime() + 7 * 24 * 60 * 60 * 1000) > today
-                    : date.getMonth() === today.getMonth() && date.getFullYear() === today.getFullYear();
+                    : date <= today && new Date(date.getTime() + 7 * 24 * 60 * 60 * 1000) > today;
 
                   return (
                     <div
                       key={index}
-                      className={`flex-1 text-center text-xs border-l border-gray-700 flex flex-col items-center justify-center ${
-                        isToday ? 'bg-cyan-500/70 text-yellow-300 font-semibold' : 'text-gray-400'
+                      className={`text-center text-xs border-l border-gray-700 flex flex-col items-center justify-center ${
+                        isToday ? 'text-yellow-300 font-semibold' : 'text-gray-400'
                       }`}
+                      style={{ width: `${cellWidth}px` }}
                     >
-                      {viewMode === 'month' ? (
-                        formatDate(date)
-                      ) : viewMode === 'week' ? (
+                      {viewMode === 'week' ? (
                         formatDate(date)
                       ) : (
                         <>
@@ -990,8 +897,8 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
               return (
                 <div key={category}>
                   {/* Category header */}
-                  <div className="flex bg-gray-700 hover:bg-gray-600">
-                    <div className="w-64 flex-shrink-0 p-2 font-bold text-white flex items-center gap-2">
+                  <div className="flex bg-gray-700 hover:bg-gray-600 group">
+                    <div className="w-64 flex-shrink-0 p-2 font-bold text-white flex items-center gap-2 sticky left-0 bg-gray-700 group-hover:bg-gray-600 z-20">
                       <span
                         className="cursor-pointer"
                         onClick={() => toggleCategory(category)}
@@ -1053,21 +960,13 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
                         </button>
                       </div>
                     </div>
-                    <div className="flex-1 flex relative p-2">
+                    <div className="flex relative p-2" style={{ width: `${timelineWidth}px` }}>
                       {timelineDates.map((date, index) => {
-                        const today = new Date();
-                        const isToday = viewMode === 'day'
-                          ? date.toDateString() === today.toDateString()
-                          : viewMode === 'week'
-                          ? date <= today && new Date(date.getTime() + 7 * 24 * 60 * 60 * 1000) > today
-                          : date.getMonth() === today.getMonth() && date.getFullYear() === today.getFullYear();
-
                         return (
                           <div
                             key={index}
-                            className={`flex-1 border-l border-gray-700 ${
-                              isToday ? 'bg-cyan-500/70' : ''
-                            }`}
+                            className="border-l border-gray-700"
+                            style={{ width: `${cellWidth}px` }}
                           />
                         );
                       })}
@@ -1090,12 +989,25 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
                           ).map(({ task, event }, eventIndex) => {
                             if (!event.due_date) return null;
                             const eventDate = parseDateString(event.due_date);
-                            const chartStart = timelineDates[0];
-                            const chartEnd = timelineDates[timelineDates.length - 1];
-                            const totalDuration = chartEnd.getTime() - chartStart.getTime();
-                            const eventPos = ((eventDate.getTime() - chartStart.getTime()) / totalDuration) * 100;
 
-                            if (eventPos < 0 || eventPos > 100) return null;
+                            // Find which timeline cell this event falls in
+                            let eventCellIndex = -1;
+                            for (let i = 0; i < timelineDates.length; i++) {
+                              const cellDate = timelineDates[i];
+                              const nextCellDate = i < timelineDates.length - 1
+                                ? timelineDates[i + 1]
+                                : new Date(cellDate.getTime() + unitInMs);
+
+                              if (eventDate >= cellDate && eventDate < nextCellDate) {
+                                eventCellIndex = i;
+                                break;
+                              }
+                            }
+
+                            if (eventCellIndex === -1) return null; // Event is outside visible range
+
+                            // Calculate position using fixed cell width (add +1 for shift, center in cell)
+                            const eventPos = (eventCellIndex + 1) * cellWidth + (cellWidth / 2);
 
                             const eventColor = getEventColor(event.status);
                             const tooltipText = `${task.sub_category} : ${task.name} : ${event.name}`;
@@ -1105,10 +1017,10 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
                                 key={`cat-event-${event.id}-${eventIndex}`}
                                 className="absolute cursor-pointer"
                                 style={{
-                                  left: `${eventPos}%`,
+                                  left: `${eventPos + TIMELINE_PADDING}px`,
                                   top: '50%',
                                   transform: 'translate(-50%, -50%)',
-                                  zIndex: 20,
+                                  zIndex: 12,
                                 }}
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -1138,8 +1050,8 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
                       return (
                         <div key={subCategoryKey}>
                           {/* Subcategory header */}
-                          <div className="flex bg-gray-750 hover:bg-gray-650">
-                            <div className="w-64 flex-shrink-0 p-2 pl-6 font-semibold text-gray-200 flex items-center gap-2">
+                          <div className="flex bg-gray-800 hover:bg-gray-700 group">
+                            <div className="w-64 flex-shrink-0 p-2 pl-6 font-semibold text-gray-200 flex items-center gap-2 sticky left-0 bg-gray-800 group-hover:bg-gray-700 z-20">
                               <span
                                 className="cursor-pointer"
                                 onClick={() => toggleSubCategory(subCategoryKey)}
@@ -1199,21 +1111,13 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
                                 </button>
                               </div>
                             </div>
-                            <div className="flex-1 flex relative p-2">
+                            <div className="flex relative p-2" style={{ width: `${timelineWidth}px` }}>
                               {timelineDates.map((date, index) => {
-                                const today = new Date();
-                                const isToday = viewMode === 'day'
-                                  ? date.toDateString() === today.toDateString()
-                                  : viewMode === 'week'
-                                  ? date <= today && new Date(date.getTime() + 7 * 24 * 60 * 60 * 1000) > today
-                                  : date.getMonth() === today.getMonth() && date.getFullYear() === today.getFullYear();
-
                                 return (
                                   <div
                                     key={index}
-                                    className={`flex-1 border-l border-gray-700 ${
-                                      isToday ? 'bg-cyan-500/70' : ''
-                                    }`}
+                                    className="border-l border-gray-700"
+                                    style={{ width: `${cellWidth}px` }}
                                   />
                                 );
                               })}
@@ -1236,12 +1140,25 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
                                   ).map(({ task, event }, eventIndex) => {
                                     if (!event.due_date) return null;
                                     const eventDate = parseDateString(event.due_date);
-                                    const chartStart = timelineDates[0];
-                                    const chartEnd = timelineDates[timelineDates.length - 1];
-                                    const totalDuration = chartEnd.getTime() - chartStart.getTime();
-                                    const eventPos = ((eventDate.getTime() - chartStart.getTime()) / totalDuration) * 100;
 
-                                    if (eventPos < 0 || eventPos > 100) return null;
+                                    // Find which timeline cell this event falls in
+                                    let eventCellIndex = -1;
+                                    for (let i = 0; i < timelineDates.length; i++) {
+                                      const cellDate = timelineDates[i];
+                                      const nextCellDate = i < timelineDates.length - 1
+                                        ? timelineDates[i + 1]
+                                        : new Date(cellDate.getTime() + unitInMs);
+
+                                      if (eventDate >= cellDate && eventDate < nextCellDate) {
+                                        eventCellIndex = i;
+                                        break;
+                                      }
+                                    }
+
+                                    if (eventCellIndex === -1) return null; // Event is outside visible range
+
+                                    // Calculate position using fixed cell width (add +1 for shift, center in cell)
+                                    const eventPos = (eventCellIndex + 1) * cellWidth + (cellWidth / 2);
 
                                     const eventColor = getEventColor(event.status);
                                     const tooltipText = `${task.name} : ${event.name}`;
@@ -1251,10 +1168,10 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
                                         key={`subcat-event-${event.id}-${eventIndex}`}
                                         className="absolute cursor-pointer"
                                         style={{
-                                          left: `${eventPos}%`,
+                                          left: `${eventPos + TIMELINE_PADDING}px`,
                                           top: '50%',
                                           transform: 'translate(-50%, -50%)',
-                                          zIndex: 20,
+                                          zIndex: 12,
                                         }}
                                         onClick={(e) => {
                                           e.stopPropagation();
@@ -1291,9 +1208,11 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
                                 getEventColor={getEventColor}
                                 handleEventClick={handleEventClick}
                                 handleAddEvent={handleAddEvent}
-                                handleTaskBarMouseDown={handleTaskBarMouseDown}
-                                draggingTaskId={draggingTask?.taskId || null}
-                                tempDates={tempDates}
+                                mouseDownInfo={mouseDownInfo}
+                                setMouseDownInfo={setMouseDownInfo}
+                                timelineWidth={timelineWidth}
+                                cellWidth={cellWidth}
+                                unitInMs={unitInMs}
                               />
                             );
                           })}

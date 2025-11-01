@@ -399,15 +399,8 @@ export default function TaskForm({ isOpen, onClose, onSave, editData, initialCat
           {/* Events section - only show when editing existing task */}
           {localTaskData && (
             <div className="mt-6 pt-6 border-t border-gray-700">
-              <div className="flex justify-between items-center mb-4">
+              <div className="mb-4">
                 <h3 className="text-lg font-bold text-white">イベント</h3>
-                <button
-                  type="button"
-                  onClick={handleAddEvent}
-                  className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm"
-                >
-                  + イベント追加
-                </button>
               </div>
 
               {localTaskData.events && localTaskData.events.length > 0 ? (
