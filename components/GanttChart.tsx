@@ -179,9 +179,45 @@ function SortableTaskRow({
               onMouseDown={(e) => handleTaskBarMouseDown(e, task, e.currentTarget)}
               onMouseMove={handleMouseMove}
               onMouseLeave={handleMouseLeave}
+              onClick={(e) => {
+                // Check if this was a click (not a drag)
+                if (draggingTask && draggingTask.taskId === task.id) {
+                  const timeDiff = Date.now() - draggingTask.mouseDownTime;
+                  const distanceMoved = Math.abs(e.clientX - draggingTask.mouseDownX);
+
+                  // If mouse didn't move much and time was short, treat as click
+                  if (timeDiff < 300 && distanceMoved < 5) {
+                    e.stopPropagation();
+
+                    // Calculate clicked position relative to task bar
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const clickX = e.clientX - rect.left;
+                    const clickPercent = clickX / rect.width;
+
+                    // Calculate date based on task's start and end dates
+                    const taskStart = position.start;
+                    const taskEnd = position.end;
+                    const taskDuration = taskEnd.getTime() - taskStart.getTime();
+                    const clickedTime = taskStart.getTime() + (taskDuration * clickPercent);
+                    const clickedDate = new Date(clickedTime);
+
+                    // Format date as YYYY-MM-DD
+                    const dateStr = clickedDate.toISOString().split('T')[0];
+
+                    // Open event add dialog with the clicked date
+                    handleAddEvent(task.id, dateStr);
+                  }
+                }
+              }}
               title={`${task.name} (${task.status})`}
             >
-              <div className="text-xs text-white px-2 py-1 truncate pointer-events-none">
+              <div
+                className="text-xs text-white px-2 py-1 truncate pointer-events-auto cursor-pointer"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onTaskClick(task);
+                }}
+              >
                 {task.name}
               </div>
             </div>
@@ -320,6 +356,7 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
     initialStartDate: Date;
     initialEndDate: Date;
     mouseDownX: number;
+    mouseDownTime: number;
   } | null>(null);
   const [tempDates, setTempDates] = useState<{ startDate: Date; endDate: Date } | null>(null);
 
@@ -682,6 +719,7 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
       initialStartDate: parseDateString(task.start_date),
       initialEndDate: parseDateString(task.end_date),
       mouseDownX: e.clientX,
+      mouseDownTime: Date.now(),
     });
 
     setTempDates({
