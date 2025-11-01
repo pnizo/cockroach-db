@@ -19,6 +19,21 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import {
+  initializeTaskOrder,
+  updateTaskOrderForSubcategory,
+  sortTasksByOrder,
+  cleanupTaskOrder,
+  addTaskToOrder,
+  initializeCategoryOrder,
+  saveCategoryOrder,
+  loadCategoryOrder,
+  initializeSubcategoryOrder,
+  saveSubcategoryOrder,
+  loadSubcategoryOrder,
+  addCategoryToOrder,
+  addSubcategoryToOrder,
+} from '@/lib/taskOrderStorage';
 
 // Helper function to parse date strings without timezone issues
 const parseDateString = (dateString: string): Date => {
@@ -318,8 +333,6 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [localTasks, setLocalTasks] = useState<Task[]>(tasks);
-  const [categoryOrders, setCategoryOrders] = useState<Record<string, number>>({});
-  const [subCategoryOrders, setSubCategoryOrders] = useState<Record<string, number>>({});
 
   // Click detection for task bars
   const [mouseDownInfo, setMouseDownInfo] = useState<{
@@ -328,46 +341,33 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
     mouseDownTime: number;
   } | null>(null);
 
-  // Sync local tasks with props
+  // Sync local tasks with props and initialize/cleanup localStorage order
   useEffect(() => {
     setLocalTasks(tasks);
-  }, [tasks]);
 
-  // Fetch category orders
-  useEffect(() => {
-    const fetchCategoryOrders = async () => {
-      try {
-        const response = await fetch('/api/category-order');
-        const data = await response.json();
-        const orders: Record<string, number> = {};
-        data.orders.forEach((order: any) => {
-          orders[order.category] = order.display_order;
-        });
-        setCategoryOrders(orders);
-      } catch (error) {
-        console.error('Error fetching category orders:', error);
-      }
-    };
-    fetchCategoryOrders();
-  }, [tasks]);
+    // Initialize task order from localStorage or DB on first load
+    if (tasks.length > 0) {
+      const taskIds = tasks.map(t => t.id);
+      cleanupTaskOrder(taskIds); // Remove deleted tasks from order
+      initializeTaskOrder(tasks); // Initialize if not exists
+      initializeCategoryOrder(tasks); // Initialize category order
+      initializeSubcategoryOrder(tasks); // Initialize subcategory order
 
-  // Fetch subcategory orders
-  useEffect(() => {
-    const fetchSubCategoryOrders = async () => {
-      try {
-        const response = await fetch('/api/subcategory-order');
-        const data = await response.json();
-        const orders: Record<string, number> = {};
-        data.orders.forEach((order: any) => {
-          const key = `${order.category}-${order.sub_category}`;
-          orders[key] = order.display_order;
-        });
-        setSubCategoryOrders(orders);
-      } catch (error) {
-        console.error('Error fetching subcategory orders:', error);
-      }
-    };
-    fetchSubCategoryOrders();
+      // Ensure new categories/subcategories are added to order
+      const categories = Array.from(new Set(tasks.map(t => t.category)));
+      categories.forEach(cat => addCategoryToOrder(cat));
+
+      const subcategories = new Map<string, Set<string>>();
+      tasks.forEach(task => {
+        if (!subcategories.has(task.category)) {
+          subcategories.set(task.category, new Set());
+        }
+        subcategories.get(task.category)!.add(task.sub_category);
+      });
+      subcategories.forEach((subs, cat) => {
+        subs.forEach(sub => addSubcategoryToOrder(cat, sub));
+      });
+    }
   }, [tasks]);
 
   // Save expanded categories to localStorage when changed
@@ -392,11 +392,14 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
     })
   );
 
-  // Group tasks by category and subcategory
+  // Group tasks by category and subcategory (sorted by localStorage order)
   const groupedTasks = useMemo(() => {
     const groups: Record<string, Record<string, Task[]>> = {};
 
-    localTasks.forEach((task) => {
+    // Sort tasks using localStorage order first
+    const sortedTasks = sortTasksByOrder(localTasks);
+
+    sortedTasks.forEach((task) => {
       if (!groups[task.category]) {
         groups[task.category] = {};
       }
@@ -406,35 +409,44 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
       groups[task.category][task.sub_category].push(task);
     });
 
-    // Sort tasks by display_order within each subcategory
-    Object.values(groups).forEach((subCategories) => {
-      Object.values(subCategories).forEach((taskList) => {
-        taskList.sort((a, b) => a.display_order - b.display_order);
-      });
-    });
-
     return groups;
   }, [localTasks]);
 
-  // Get sorted categories based on display_order
+  // Get sorted categories based on localStorage order
   const sortedCategories = useMemo(() => {
     const categories = Object.keys(groupedTasks);
-    return categories.sort((a, b) => {
-      const orderA = categoryOrders[a] ?? 999999;
-      const orderB = categoryOrders[b] ?? 999999;
-      return orderA - orderB;
-    });
-  }, [groupedTasks, categoryOrders]);
+    const categoryOrder = loadCategoryOrder();
 
-  // Get sorted subcategories for a category based on display_order
+    // Sort by localStorage order
+    return categories.sort((a, b) => {
+      const indexA = categoryOrder.indexOf(a);
+      const indexB = categoryOrder.indexOf(b);
+
+      // If not in order, put at end
+      if (indexA === -1 && indexB === -1) return 0;
+      if (indexA === -1) return 1;
+      if (indexB === -1) return -1;
+
+      return indexA - indexB;
+    });
+  }, [groupedTasks]);
+
+  // Get sorted subcategories for a category based on localStorage order
   const getSortedSubCategories = (category: string) => {
     const subCategories = Object.keys(groupedTasks[category] || {});
+    const subcategoryOrder = loadSubcategoryOrder();
+    const categorySubOrder = subcategoryOrder[category] || [];
+
     return subCategories.sort((a, b) => {
-      const keyA = `${category}-${a}`;
-      const keyB = `${category}-${b}`;
-      const orderA = subCategoryOrders[keyA] ?? 999999;
-      const orderB = subCategoryOrders[keyB] ?? 999999;
-      return orderA - orderB;
+      const indexA = categorySubOrder.indexOf(a);
+      const indexB = categorySubOrder.indexOf(b);
+
+      // If not in order, put at end
+      if (indexA === -1 && indexB === -1) return 0;
+      if (indexA === -1) return 1;
+      if (indexB === -1) return -1;
+
+      return indexA - indexB;
     });
   };
 
@@ -509,46 +521,58 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
     setExpandedSubCategories(newExpanded);
   };
 
-  const moveCategoryOrder = async (category: string, direction: 'up' | 'down') => {
-    try {
-      const response = await fetch('/api/category-order', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category, direction }),
-      });
+  const moveCategoryOrder = (category: string, direction: 'up' | 'down') => {
+    const currentOrder = loadCategoryOrder();
+    const index = currentOrder.indexOf(category);
 
-      if (!response.ok) throw new Error('Failed to update category order');
+    if (index === -1) return; // Category not found
 
-      const data = await response.json();
-      const orders: Record<string, number> = {};
-      data.orders.forEach((order: any) => {
-        orders[order.category] = order.display_order;
-      });
-      setCategoryOrders(orders);
-    } catch (error) {
-      console.error('Error updating category order:', error);
+    if (direction === 'up' && index > 0) {
+      // Swap with previous
+      const newOrder = [...currentOrder];
+      [newOrder[index - 1], newOrder[index]] = [newOrder[index], newOrder[index - 1]];
+      saveCategoryOrder(newOrder);
+
+      // Force re-render by updating local tasks
+      setLocalTasks([...localTasks]);
+    } else if (direction === 'down' && index < currentOrder.length - 1) {
+      // Swap with next
+      const newOrder = [...currentOrder];
+      [newOrder[index], newOrder[index + 1]] = [newOrder[index + 1], newOrder[index]];
+      saveCategoryOrder(newOrder);
+
+      // Force re-render by updating local tasks
+      setLocalTasks([...localTasks]);
     }
   };
 
-  const moveSubCategoryOrder = async (category: string, subCategory: string, direction: 'up' | 'down') => {
-    try {
-      const response = await fetch('/api/subcategory-order', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category, sub_category: subCategory, direction }),
-      });
+  const moveSubCategoryOrder = (category: string, subCategory: string, direction: 'up' | 'down') => {
+    const currentOrder = loadSubcategoryOrder();
+    const categoryOrder = currentOrder[category] || [];
+    const index = categoryOrder.indexOf(subCategory);
 
-      if (!response.ok) throw new Error('Failed to update subcategory order');
+    if (index === -1) return; // Subcategory not found
 
-      const data = await response.json();
-      const orders: Record<string, number> = {};
-      data.orders.forEach((order: any) => {
-        const key = `${order.category}-${order.sub_category}`;
-        orders[key] = order.display_order;
-      });
-      setSubCategoryOrders(orders);
-    } catch (error) {
-      console.error('Error updating subcategory order:', error);
+    if (direction === 'up' && index > 0) {
+      // Swap with previous
+      const newCategoryOrder = [...categoryOrder];
+      [newCategoryOrder[index - 1], newCategoryOrder[index]] = [newCategoryOrder[index], newCategoryOrder[index - 1]];
+
+      const newOrder = { ...currentOrder, [category]: newCategoryOrder };
+      saveSubcategoryOrder(newOrder);
+
+      // Force re-render by updating local tasks
+      setLocalTasks([...localTasks]);
+    } else if (direction === 'down' && index < categoryOrder.length - 1) {
+      // Swap with next
+      const newCategoryOrder = [...categoryOrder];
+      [newCategoryOrder[index], newCategoryOrder[index + 1]] = [newCategoryOrder[index + 1], newCategoryOrder[index]];
+
+      const newOrder = { ...currentOrder, [category]: newCategoryOrder };
+      saveSubcategoryOrder(newOrder);
+
+      // Force re-render by updating local tasks
+      setLocalTasks([...localTasks]);
     }
   };
 
@@ -735,7 +759,7 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
     setIsEventFormOpen(true);
   };
 
-  const handleDragEnd = async (event: DragEndEvent) => {
+  const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
 
     if (!over || active.id === over.id) return;
@@ -781,29 +805,9 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
     });
     setLocalTasks(newLocalTasks);
 
-    // Send update to server
-    try {
-      const response = await fetch('/api/tasks/reorder', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          tasks: updatedTasks.map((t) => ({ id: t.id, display_order: t.display_order })),
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to update task order');
-      }
-
-      // Refresh the entire task list from parent
-      onRefresh();
-    } catch (error) {
-      console.error('Error updating task order:', error);
-      // Revert on error
-      setLocalTasks(tasks);
-    }
+    // Save the new order to localStorage (no API call, no page reload)
+    const taskIds = reorderedSubcategoryTasks.map(t => t.id);
+    updateTaskOrderForSubcategory(activeTask.category, activeTask.sub_category, taskIds);
   };
 
   return (
