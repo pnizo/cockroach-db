@@ -1051,7 +1051,9 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
                             title={`${category}: ${categoryPosition.start.toLocaleDateString('ja-JP')} - ${categoryPosition.end.toLocaleDateString('ja-JP')}`}
                           />
                           {/* Event markers for all tasks in category */}
-                          {allCategoryTasks.flatMap(task => task.events || []).map((event, eventIndex) => {
+                          {allCategoryTasks.flatMap(task =>
+                            (task.events || []).map(event => ({ task, event }))
+                          ).map(({ task, event }, eventIndex) => {
                             if (!event.due_date) return null;
                             const eventDate = parseDateString(event.due_date);
                             const chartStart = timelineDates[0];
@@ -1062,6 +1064,7 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
                             if (eventPos < 0 || eventPos > 100) return null;
 
                             const eventColor = getEventColor(event.status);
+                            const tooltipText = `${task.sub_category} : ${task.name} : ${event.name}`;
 
                             return (
                               <div
@@ -1077,7 +1080,7 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
                                   e.stopPropagation();
                                   handleEventClick(event);
                                 }}
-                                title={event.name}
+                                title={tooltipText}
                               >
                                 <div className={`w-2.5 h-2.5 ${eventColor.bg} rounded-full border border-white`}></div>
                               </div>
@@ -1194,7 +1197,9 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
                                     title={`${subCategory}: ${subCategoryPosition.start.toLocaleDateString('ja-JP')} - ${subCategoryPosition.end.toLocaleDateString('ja-JP')}`}
                                   />
                                   {/* Event markers for all tasks in subcategory */}
-                                  {subTasks.flatMap(task => task.events || []).map((event, eventIndex) => {
+                                  {subTasks.flatMap(task =>
+                                    (task.events || []).map(event => ({ task, event }))
+                                  ).map(({ task, event }, eventIndex) => {
                                     if (!event.due_date) return null;
                                     const eventDate = parseDateString(event.due_date);
                                     const chartStart = timelineDates[0];
@@ -1205,6 +1210,7 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
                                     if (eventPos < 0 || eventPos > 100) return null;
 
                                     const eventColor = getEventColor(event.status);
+                                    const tooltipText = `${task.name} : ${event.name}`;
 
                                     return (
                                       <div
@@ -1220,7 +1226,7 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
                                           e.stopPropagation();
                                           handleEventClick(event);
                                         }}
-                                        title={event.name}
+                                        title={tooltipText}
                                       >
                                         <div className={`w-2.5 h-2.5 ${eventColor.bg} rounded-full border border-white`}></div>
                                       </div>
