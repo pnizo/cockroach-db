@@ -180,6 +180,8 @@ function SortableTaskRow({
               onMouseMove={handleMouseMove}
               onMouseLeave={handleMouseLeave}
               onClick={(e) => {
+                e.stopPropagation(); // Always stop propagation to prevent task edit dialog
+
                 // Check if this was a click (not a drag)
                 if (mouseDownInfo && mouseDownInfo.taskId === task.id) {
                   const timeDiff = Date.now() - mouseDownInfo.mouseDownTime;
@@ -187,8 +189,6 @@ function SortableTaskRow({
 
                   // If mouse didn't move much and time was short, treat as click
                   if (timeDiff < 300 && distanceMoved < 5) {
-                    e.stopPropagation();
-
                     // Calculate clicked position relative to task bar
                     const rect = e.currentTarget.getBoundingClientRect();
                     const clickX = e.clientX - rect.left;
