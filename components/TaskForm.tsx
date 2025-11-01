@@ -174,6 +174,34 @@ export default function TaskForm({ isOpen, onClose, onSave, editData, initialCat
     }
   };
 
+  const handleDelete = async () => {
+    if (!editData?.id) return;
+
+    if (!confirm('このタスクを削除してもよろしいですか？\n\n「OK」を押すと完全に削除されます。')) {
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/tasks?id=${editData.id}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete task');
+      }
+
+      onSave(); // リフレッシュ
+      onClose(); // ダイアログを閉じる
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '削除に失敗しました');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleAddEvent = () => {
     setEditingEvent(null);
     setIsEventFormOpen(true);
@@ -440,22 +468,36 @@ export default function TaskForm({ isOpen, onClose, onSave, editData, initialCat
             </div>
           )}
 
-          <div className="flex justify-end gap-3 mt-6">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={loading}
-              className="px-6 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 disabled:opacity-50"
-            >
-              キャンセル
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
-            >
-              {loading ? '保存中...' : '保存'}
-            </button>
+          <div className="flex justify-between gap-3 mt-6">
+            <div>
+              {editData && (
+                <button
+                  type="button"
+                  onClick={handleDelete}
+                  disabled={loading}
+                  className="px-6 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+                >
+                  {loading ? '削除中...' : '削除'}
+                </button>
+              )}
+            </div>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={loading}
+                className="px-6 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 disabled:opacity-50"
+              >
+                キャンセル
+              </button>
+              <button
+                type="submit"
+                disabled={loading}
+                className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+              >
+                {loading ? '保存中...' : '保存'}
+              </button>
+            </div>
           </div>
         </form>
 

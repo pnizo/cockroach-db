@@ -71,6 +71,9 @@ interface SortableTaskRowProps {
   getEventColor: (status: string) => { bg: string; hover: string; border: string };
   handleEventClick: (event: Event) => void;
   handleAddEvent: (taskId: string, date: string) => void;
+  handleTaskBarMouseDown: (e: React.MouseEvent, task: Task, barElement: HTMLElement) => void;
+  draggingTaskId: string | null;
+  tempDates: { startDate: Date; endDate: Date } | null;
 }
 
 function SortableTaskRow({
@@ -83,10 +86,33 @@ function SortableTaskRow({
   getEventColor,
   handleEventClick,
   handleAddEvent,
+  handleTaskBarMouseDown,
+  draggingTaskId,
+  tempDates,
 }: SortableTaskRowProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
   });
+
+  const [cursorType, setCursorType] = useState<'grab' | 'ew-resize' | 'default'>('default');
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!position || draggingTaskId) return;
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const width = rect.width;
+
+    if (x < 10 || x > width - 10) {
+      setCursorType('ew-resize');
+    } else {
+      setCursorType('grab');
+    }
+  };
+
+  const handleMouseLeave = () => {
+    setCursorType('default');
+  };
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -136,49 +162,62 @@ function SortableTaskRow({
           );
         })}
         {position && (
-          <div
-            className={`absolute h-6 rounded ${getStatusColor(
-              task.status
-            )} opacity-80 hover:opacity-100 cursor-pointer pointer-events-auto`}
-            style={{
-              left: position.left,
-              width: position.width,
-              top: '50%',
-              transform: 'translateY(-50%)',
-              zIndex: 10,
-            }}
-            onClick={(e) => {
-              e.stopPropagation();
-              // Calculate the clicked position relative to the timeline
-              const rect = e.currentTarget.parentElement!.getBoundingClientRect();
-              const clickX = e.clientX - rect.left;
-              const clickPercent = clickX / rect.width;
-
-              // Calculate the date at the clicked position
-              const chartStart = timelineDates[0];
-              const chartEnd = timelineDates[timelineDates.length - 1];
-              const totalDuration = chartEnd.getTime() - chartStart.getTime();
-              const clickedTime = chartStart.getTime() + (totalDuration * clickPercent);
-              const clickedDate = new Date(clickedTime);
-
-              // Format date as YYYY-MM-DD
-              const dateStr = clickedDate.toISOString().split('T')[0];
-
-              // Open event add dialog with the clicked date
-              handleAddEvent(task.id, dateStr);
-            }}
-            title={`${task.name} (${task.status})`}
-          >
+          <>
+            {/* Main task bar */}
             <div
-              className="text-xs text-white px-2 py-1 truncate"
-              onClick={(e) => {
-                e.stopPropagation();
-                onTaskClick(task);
+              className={`absolute h-6 rounded ${getStatusColor(
+                task.status
+              )} ${draggingTaskId === task.id ? 'opacity-50' : 'opacity-80 hover:opacity-100'} pointer-events-auto`}
+              style={{
+                left: position.left,
+                width: position.width,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                zIndex: 10,
+                cursor: draggingTaskId === task.id ? 'grabbing' : cursorType,
               }}
+              onMouseDown={(e) => handleTaskBarMouseDown(e, task, e.currentTarget)}
+              onMouseMove={handleMouseMove}
+              onMouseLeave={handleMouseLeave}
+              title={`${task.name} (${task.status})`}
             >
-              {task.name}
+              <div className="text-xs text-white px-2 py-1 truncate pointer-events-none">
+                {task.name}
+              </div>
             </div>
-          </div>
+
+            {/* Temporary bar during dragging */}
+            {draggingTaskId === task.id && tempDates && (
+              (() => {
+                const chartStart = timelineDates[0];
+                const chartEnd = timelineDates[timelineDates.length - 1];
+                const totalDuration = chartEnd.getTime() - chartStart.getTime();
+
+                const tempStartPercent = ((tempDates.startDate.getTime() - chartStart.getTime()) / totalDuration) * 100;
+                const tempEndPercent = ((tempDates.endDate.getTime() - chartStart.getTime()) / totalDuration) * 100;
+                const tempWidth = tempEndPercent - tempStartPercent;
+
+                return (
+                  <div
+                    className={`absolute h-6 rounded ${getStatusColor(
+                      task.status
+                    )} opacity-100 pointer-events-none border-2 border-white`}
+                    style={{
+                      left: `${tempStartPercent}%`,
+                      width: `${tempWidth}%`,
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      zIndex: 20,
+                    }}
+                  >
+                    <div className="text-xs text-white px-2 py-1 truncate">
+                      {task.name}
+                    </div>
+                  </div>
+                );
+              })()
+            )}
+          </>
         )}
         {/* Event markers with balloons */}
         {task.events.map((event, eventIndex) => {
@@ -272,6 +311,17 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
   const [localTasks, setLocalTasks] = useState<Task[]>(tasks);
   const [categoryOrders, setCategoryOrders] = useState<Record<string, number>>({});
   const [subCategoryOrders, setSubCategoryOrders] = useState<Record<string, number>>({});
+
+  // Drag state for task bars
+  const [draggingTask, setDraggingTask] = useState<{
+    taskId: string;
+    mode: 'move' | 'resize-left' | 'resize-right';
+    initialX: number;
+    initialStartDate: Date;
+    initialEndDate: Date;
+    mouseDownX: number;
+  } | null>(null);
+  const [tempDates, setTempDates] = useState<{ startDate: Date; endDate: Date } | null>(null);
 
   // Sync local tasks with props
   useEffect(() => {
@@ -600,6 +650,149 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
     setIsEventFormOpen(true);
   };
 
+  // Task bar drag handlers
+  const handleTaskBarMouseDown = (
+    e: React.MouseEvent,
+    task: Task,
+    barElement: HTMLElement
+  ) => {
+    if (!task.start_date || !task.end_date) return;
+
+    e.stopPropagation();
+    e.preventDefault();
+
+    const rect = barElement.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const barWidth = rect.width;
+
+    // Determine drag mode based on click position (10px from edges)
+    let mode: 'move' | 'resize-left' | 'resize-right';
+    if (clickX < 10) {
+      mode = 'resize-left';
+    } else if (clickX > barWidth - 10) {
+      mode = 'resize-right';
+    } else {
+      mode = 'move';
+    }
+
+    setDraggingTask({
+      taskId: task.id,
+      mode,
+      initialX: e.clientX,
+      initialStartDate: parseDateString(task.start_date),
+      initialEndDate: parseDateString(task.end_date),
+      mouseDownX: e.clientX,
+    });
+
+    setTempDates({
+      startDate: parseDateString(task.start_date),
+      endDate: parseDateString(task.end_date),
+    });
+  };
+
+  const handleTaskBarMouseMove = (e: MouseEvent) => {
+    if (!draggingTask) return;
+
+    const timelineElement = document.querySelector('.flex-1.flex.relative.p-2');
+    if (!timelineElement) return;
+
+    const rect = timelineElement.getBoundingClientRect();
+    const deltaX = e.clientX - draggingTask.initialX;
+    const timelineWidth = rect.width;
+
+    // Calculate date change based on pixel movement
+    const chartStart = timelineDates[0];
+    const chartEnd = timelineDates[timelineDates.length - 1];
+    const totalDuration = chartEnd.getTime() - chartStart.getTime();
+    const deltaTime = (deltaX / timelineWidth) * totalDuration;
+
+    let newStartDate = new Date(draggingTask.initialStartDate);
+    let newEndDate = new Date(draggingTask.initialEndDate);
+
+    if (draggingTask.mode === 'move') {
+      // Move entire bar
+      newStartDate = new Date(draggingTask.initialStartDate.getTime() + deltaTime);
+      newEndDate = new Date(draggingTask.initialEndDate.getTime() + deltaTime);
+    } else if (draggingTask.mode === 'resize-left') {
+      // Resize from left (change start date)
+      newStartDate = new Date(draggingTask.initialStartDate.getTime() + deltaTime);
+      // Ensure start date doesn't exceed end date
+      if (newStartDate >= draggingTask.initialEndDate) {
+        newStartDate = new Date(draggingTask.initialEndDate.getTime() - 24 * 60 * 60 * 1000);
+      }
+    } else if (draggingTask.mode === 'resize-right') {
+      // Resize from right (change end date)
+      newEndDate = new Date(draggingTask.initialEndDate.getTime() + deltaTime);
+      // Ensure end date doesn't precede start date
+      if (newEndDate <= draggingTask.initialStartDate) {
+        newEndDate = new Date(draggingTask.initialStartDate.getTime() + 24 * 60 * 60 * 1000);
+      }
+    }
+
+    setTempDates({ startDate: newStartDate, endDate: newEndDate });
+  };
+
+  const handleTaskBarMouseUp = async (e: MouseEvent) => {
+    if (!draggingTask) return;
+
+    const moveDistance = Math.abs(e.clientX - draggingTask.mouseDownX);
+
+    // If movement is less than 5px, treat it as a click
+    if (moveDistance < 5 && tempDates) {
+      const rect = (e.target as HTMLElement).getBoundingClientRect();
+      const clickX = draggingTask.mouseDownX - rect.left;
+      const clickPercent = clickX / rect.width;
+
+      const chartStart = timelineDates[0];
+      const chartEnd = timelineDates[timelineDates.length - 1];
+      const totalDuration = chartEnd.getTime() - chartStart.getTime();
+      const clickedTime = chartStart.getTime() + (totalDuration * clickPercent);
+      const clickedDate = new Date(clickedTime);
+      const dateStr = clickedDate.toISOString().split('T')[0];
+
+      handleAddEvent(draggingTask.taskId, dateStr);
+      setDraggingTask(null);
+      setTempDates(null);
+      return;
+    }
+
+    // Update task dates via API
+    if (tempDates) {
+      try {
+        const response = await fetch('/api/tasks', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: draggingTask.taskId,
+            start_date: tempDates.startDate.toISOString().split('T')[0],
+            end_date: tempDates.endDate.toISOString().split('T')[0],
+          }),
+        });
+
+        if (response.ok) {
+          onRefresh();
+        }
+      } catch (error) {
+        console.error('Failed to update task dates:', error);
+      }
+    }
+
+    setDraggingTask(null);
+    setTempDates(null);
+  };
+
+  // Set up global mouse event listeners for dragging
+  useEffect(() => {
+    if (draggingTask) {
+      window.addEventListener('mousemove', handleTaskBarMouseMove);
+      window.addEventListener('mouseup', handleTaskBarMouseUp);
+      return () => {
+        window.removeEventListener('mousemove', handleTaskBarMouseMove);
+        window.removeEventListener('mouseup', handleTaskBarMouseUp);
+      };
+    }
+  }, [draggingTask, tempDates, timelineDates]);
+
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
 
@@ -845,16 +1038,52 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
                         );
                       })}
                       {categoryPosition && (
-                        <div
-                          className="absolute h-8 rounded bg-gray-500 opacity-60 pointer-events-none"
-                          style={{
-                            left: categoryPosition.left,
-                            width: categoryPosition.width,
-                            top: '50%',
-                            transform: 'translateY(-50%)',
-                          }}
-                          title={`${category}: ${categoryPosition.start.toLocaleDateString('ja-JP')} - ${categoryPosition.end.toLocaleDateString('ja-JP')}`}
-                        />
+                        <>
+                          <div
+                            className="absolute h-8 rounded bg-gray-500 opacity-60 pointer-events-none"
+                            style={{
+                              left: categoryPosition.left,
+                              width: categoryPosition.width,
+                              top: '50%',
+                              transform: 'translateY(-50%)',
+                              zIndex: 5,
+                            }}
+                            title={`${category}: ${categoryPosition.start.toLocaleDateString('ja-JP')} - ${categoryPosition.end.toLocaleDateString('ja-JP')}`}
+                          />
+                          {/* Event markers for all tasks in category */}
+                          {allCategoryTasks.flatMap(task => task.events || []).map((event, eventIndex) => {
+                            if (!event.due_date) return null;
+                            const eventDate = parseDateString(event.due_date);
+                            const chartStart = timelineDates[0];
+                            const chartEnd = timelineDates[timelineDates.length - 1];
+                            const totalDuration = chartEnd.getTime() - chartStart.getTime();
+                            const eventPos = ((eventDate.getTime() - chartStart.getTime()) / totalDuration) * 100;
+
+                            if (eventPos < 0 || eventPos > 100) return null;
+
+                            const eventColor = getEventColor(event.status);
+
+                            return (
+                              <div
+                                key={`cat-event-${event.id}-${eventIndex}`}
+                                className="absolute cursor-pointer"
+                                style={{
+                                  left: `${eventPos}%`,
+                                  top: '50%',
+                                  transform: 'translate(-50%, -50%)',
+                                  zIndex: 20,
+                                }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleEventClick(event);
+                                }}
+                                title={event.name}
+                              >
+                                <div className={`w-2.5 h-2.5 ${eventColor.bg} rounded-full border border-white`}></div>
+                              </div>
+                            );
+                          })}
+                        </>
                       )}
                     </div>
                   </div>
@@ -952,16 +1181,52 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
                                 );
                               })}
                               {subCategoryPosition && (
-                                <div
-                                  className="absolute h-6 rounded bg-gray-400 opacity-60 pointer-events-none"
-                                  style={{
-                                    left: subCategoryPosition.left,
-                                    width: subCategoryPosition.width,
-                                    top: '50%',
-                                    transform: 'translateY(-50%)',
-                                  }}
-                                  title={`${subCategory}: ${subCategoryPosition.start.toLocaleDateString('ja-JP')} - ${subCategoryPosition.end.toLocaleDateString('ja-JP')}`}
-                                />
+                                <>
+                                  <div
+                                    className="absolute h-6 rounded bg-gray-400 opacity-60 pointer-events-none"
+                                    style={{
+                                      left: subCategoryPosition.left,
+                                      width: subCategoryPosition.width,
+                                      top: '50%',
+                                      transform: 'translateY(-50%)',
+                                      zIndex: 5,
+                                    }}
+                                    title={`${subCategory}: ${subCategoryPosition.start.toLocaleDateString('ja-JP')} - ${subCategoryPosition.end.toLocaleDateString('ja-JP')}`}
+                                  />
+                                  {/* Event markers for all tasks in subcategory */}
+                                  {subTasks.flatMap(task => task.events || []).map((event, eventIndex) => {
+                                    if (!event.due_date) return null;
+                                    const eventDate = parseDateString(event.due_date);
+                                    const chartStart = timelineDates[0];
+                                    const chartEnd = timelineDates[timelineDates.length - 1];
+                                    const totalDuration = chartEnd.getTime() - chartStart.getTime();
+                                    const eventPos = ((eventDate.getTime() - chartStart.getTime()) / totalDuration) * 100;
+
+                                    if (eventPos < 0 || eventPos > 100) return null;
+
+                                    const eventColor = getEventColor(event.status);
+
+                                    return (
+                                      <div
+                                        key={`subcat-event-${event.id}-${eventIndex}`}
+                                        className="absolute cursor-pointer"
+                                        style={{
+                                          left: `${eventPos}%`,
+                                          top: '50%',
+                                          transform: 'translate(-50%, -50%)',
+                                          zIndex: 20,
+                                        }}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleEventClick(event);
+                                        }}
+                                        title={event.name}
+                                      >
+                                        <div className={`w-2.5 h-2.5 ${eventColor.bg} rounded-full border border-white`}></div>
+                                      </div>
+                                    );
+                                  })}
+                                </>
                               )}
                             </div>
                           </div>
@@ -986,6 +1251,9 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
                                 getEventColor={getEventColor}
                                 handleEventClick={handleEventClick}
                                 handleAddEvent={handleAddEvent}
+                                handleTaskBarMouseDown={handleTaskBarMouseDown}
+                                draggingTaskId={draggingTask?.taskId || null}
+                                tempDates={tempDates}
                               />
                             );
                           })}
