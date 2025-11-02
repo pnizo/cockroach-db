@@ -54,11 +54,12 @@ const formatDateDisplay = (dateString: string | null): string => {
 interface ColumnDefinition {
   id: string;
   label: string;
-  field: keyof Task | 'actions';
+  field: keyof Task | 'actions' | 'select';
   sortable: boolean;
 }
 
 const DEFAULT_COLUMNS: ColumnDefinition[] = [
+  { id: 'select', label: '', field: 'select', sortable: false },
   { id: 'category', label: 'カテゴリー', field: 'category', sortable: true },
   { id: 'sub_category', label: 'サブカテゴリー', field: 'sub_category', sortable: true },
   { id: 'name', label: 'タスク名', field: 'name', sortable: true },
@@ -77,9 +78,11 @@ interface SortableHeaderProps {
   sortField: string | null;
   sortDirection: 'asc' | 'desc';
   onSort: (field: string) => void;
+  allSelected?: boolean;
+  onToggleSelectAll?: () => void;
 }
 
-function SortableHeader({ column, sortField, sortDirection, onSort }: SortableHeaderProps) {
+function SortableHeader({ column, sortField, sortDirection, onSort, allSelected, onToggleSelectAll }: SortableHeaderProps) {
   const {
     attributes,
     listeners,
@@ -95,6 +98,26 @@ function SortableHeader({ column, sortField, sortDirection, onSort }: SortableHe
     opacity: isDragging ? 0.5 : 1,
     cursor: 'move',
   };
+
+  // Render select all checkbox for select column
+  if (column.field === 'select') {
+    return (
+      <th
+        ref={setNodeRef}
+        style={style}
+        className="px-4 py-3 text-center"
+        {...attributes}
+        {...listeners}
+      >
+        <input
+          type="checkbox"
+          checked={allSelected || false}
+          onChange={onToggleSelectAll}
+          className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+        />
+      </th>
+    );
+  }
 
   return (
     <th
@@ -136,6 +159,8 @@ interface TaskRowProps {
   categories: string[];
   subCategories: string[];
   members: any[];
+  isSelected: boolean;
+  onToggleSelect: (taskId: string) => void;
 }
 
 function TaskRow({
@@ -152,9 +177,25 @@ function TaskRow({
   categories,
   subCategories,
   members,
+  isSelected,
+  onToggleSelect,
 }: TaskRowProps) {
   const renderCell = (column: ColumnDefinition) => {
     const field = column.field;
+
+    // Render select checkbox
+    if (field === 'select') {
+      return (
+        <td key={column.id} className="px-4 py-3 text-center">
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={() => onToggleSelect(task.id)}
+            className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+          />
+        </td>
+      );
+    }
 
     if (field === 'actions') {
       return (
@@ -418,6 +459,7 @@ export default function Home() {
   const [filterStatuses, setFilterStatuses] = useState<string[]>([]);
   const [sortField, setSortField] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
 
   // Column order management
   const [columnOrder, setColumnOrder] = useState<ColumnDefinition[]>(() => {
@@ -426,7 +468,13 @@ export default function Home() {
       if (saved) {
         try {
           const savedIds = JSON.parse(saved);
-          return savedIds.map((id: string) => DEFAULT_COLUMNS.find(col => col.id === id)!).filter(Boolean);
+          const savedColumns = savedIds.map((id: string) => DEFAULT_COLUMNS.find(col => col.id === id)).filter(Boolean) as ColumnDefinition[];
+
+          // Find new columns in DEFAULT_COLUMNS that aren't in savedIds
+          const newColumns = DEFAULT_COLUMNS.filter(col => !savedIds.includes(col.id));
+
+          // Add new columns at the beginning
+          return [...newColumns, ...savedColumns];
         } catch (e) {
           return DEFAULT_COLUMNS;
         }
@@ -570,6 +618,59 @@ export default function Home() {
       fetchTasks();
     } catch (err) {
       alert(err instanceof Error ? err.message : '複製に失敗しました');
+    }
+  };
+
+  const handleToggleSelect = (taskId: string) => {
+    const newSelected = new Set(selectedTaskIds);
+    if (newSelected.has(taskId)) {
+      newSelected.delete(taskId);
+    } else {
+      newSelected.add(taskId);
+    }
+    setSelectedTaskIds(newSelected);
+  };
+
+  const handleToggleSelectAll = () => {
+    if (selectedTaskIds.size === filteredAndSortedTasks.length && filteredAndSortedTasks.length > 0) {
+      // 全選択状態 → 全解除
+      setSelectedTaskIds(new Set());
+    } else {
+      // 一部または未選択 → 全選択
+      setSelectedTaskIds(new Set(filteredAndSortedTasks.map(t => t.id)));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedTaskIds.size === 0) return;
+
+    const confirmed = confirm(
+      `選択した${selectedTaskIds.size}件のタスクを削除してもよろしいですか？\n\n「OK」を押すと完全に削除されます。`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      // 並列削除
+      const deletePromises = Array.from(selectedTaskIds).map(taskId =>
+        fetch(`/api/tasks?id=${taskId}`, { method: 'DELETE' })
+      );
+
+      const results = await Promise.all(deletePromises);
+
+      // エラーチェック
+      const failedCount = results.filter(res => !res.ok).length;
+      if (failedCount > 0) {
+        alert(`${failedCount}件のタスクの削除に失敗しました`);
+      }
+
+      // 選択状態をクリア
+      setSelectedTaskIds(new Set());
+
+      // タスク一覧を再取得
+      fetchTasks();
+    } catch (error) {
+      alert('一括削除に失敗しました');
     }
   };
 
@@ -845,6 +946,18 @@ export default function Home() {
               </div>
             </div>
 
+            {/* Bulk delete button */}
+            {selectedTaskIds.size > 0 && (
+              <div className="mb-4">
+                <button
+                  onClick={handleBulkDelete}
+                  className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 font-semibold"
+                >
+                  選択した{selectedTaskIds.size}件を削除
+                </button>
+              </div>
+            )}
+
             <div className="overflow-x-auto">
               <DndContext
                 sensors={columnSensors}
@@ -865,6 +978,8 @@ export default function Home() {
                             sortField={sortField}
                             sortDirection={sortDirection}
                             onSort={handleSort}
+                            allSelected={selectedTaskIds.size === filteredAndSortedTasks.length && filteredAndSortedTasks.length > 0}
+                            onToggleSelectAll={handleToggleSelectAll}
                           />
                         ))}
                       </tr>
@@ -887,6 +1002,8 @@ export default function Home() {
                         categories={categories}
                         subCategories={subCategories}
                         members={members}
+                        isSelected={selectedTaskIds.has(task.id)}
+                        onToggleSelect={handleToggleSelect}
                       />
                     ))}
                   </tbody>
