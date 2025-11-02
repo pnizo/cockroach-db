@@ -30,6 +30,7 @@ interface Task {
   assignee: string | null;
   status: string;
   display_order: number;
+  note: string | null;
   events: Event[];
 }
 
@@ -40,6 +41,7 @@ interface Event {
   assignee: string | null;
   status: string;
   task_id: string;
+  note: string | null;
 }
 
 // Helper function to format date without timezone issues
@@ -67,6 +69,7 @@ const DEFAULT_COLUMNS: ColumnDefinition[] = [
   { id: 'end_date', label: '終了日', field: 'end_date', sortable: true },
   { id: 'assignee', label: '担当者', field: 'assignee', sortable: true },
   { id: 'status', label: 'ステータス', field: 'status', sortable: true },
+  { id: 'note', label: 'メモ', field: 'note', sortable: false },
   { id: 'actions', label: 'アクション', field: 'actions', sortable: false },
 ];
 
@@ -425,6 +428,22 @@ function TaskRow({
               {task.status}
             </span>
           )}
+        </td>
+      );
+    }
+
+    if (field === 'note') {
+      const truncatedNote = task.note && task.note.length > 50
+        ? task.note.substring(0, 50) + '...'
+        : task.note || '-';
+
+      return (
+        <td
+          key={column.id}
+          className="px-4 py-3 text-sm text-gray-300"
+          title={task.note || ''}
+        >
+          {truncatedNote}
         </td>
       );
     }

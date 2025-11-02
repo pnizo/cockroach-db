@@ -11,10 +11,10 @@ async function runMigration() {
   const pool = getPool();
 
   try {
-    const migrationFile = path.join(process.cwd(), 'migrations', '004_create_member_table.sql');
+    const migrationFile = path.join(process.cwd(), 'migrations', '005_add_note_to_tasks_and_events.sql');
     const sql = fs.readFileSync(migrationFile, 'utf-8');
 
-    console.log('Running migration: 004_create_member_table.sql');
+    console.log('Running migration: 005_add_note_to_tasks_and_events.sql');
     await pool.query(sql);
     console.log('Migration completed successfully!');
 

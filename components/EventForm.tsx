@@ -27,10 +27,12 @@ export default function EventForm({ isOpen, onClose, onSave, taskId, editData, s
     due_date: '',
     assignee: '',
     status: 'ToDo',
+    note: '',
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // Fetch members on mount
   useEffect(() => {
@@ -59,6 +61,7 @@ export default function EventForm({ isOpen, onClose, onSave, taskId, editData, s
         due_date: editData.due_date ? editData.due_date.split('T')[0] : '',
         assignee: editData.assignee || '',
         status: editData.status || 'ToDo',
+        note: editData.note || '',
       });
     } else {
       setFormData({
@@ -67,6 +70,7 @@ export default function EventForm({ isOpen, onClose, onSave, taskId, editData, s
         due_date: selectedDate || '',
         assignee: '',
         status: 'ToDo',
+        note: '',
       });
     }
     setError(null);
@@ -101,6 +105,36 @@ export default function EventForm({ isOpen, onClose, onSave, taskId, editData, s
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : '保存に失敗しました');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!editData) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/events', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ id: editData.id }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || '削除に失敗しました');
+      }
+
+      onSave();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '削除に失敗しました');
+      setShowDeleteConfirm(false);
     } finally {
       setLoading(false);
     }
@@ -193,27 +227,88 @@ export default function EventForm({ isOpen, onClose, onSave, taskId, editData, s
                 ))}
               </select>
             </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                メモ
+              </label>
+              <textarea
+                value={formData.note}
+                onChange={(e) => setFormData({ ...formData, note: e.target.value })}
+                className="w-full px-4 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-blue-500 focus:outline-none"
+                placeholder="メモを入力"
+                rows={4}
+                maxLength={1000}
+              />
+              <div className="text-right text-sm text-gray-400 mt-1">
+                {formData.note.length}/1000文字
+              </div>
+            </div>
           </div>
 
-          <div className="flex justify-end gap-3 mt-6">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={loading}
-              className="px-6 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 disabled:opacity-50"
-            >
-              キャンセル
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
-            >
-              {loading ? '保存中...' : '保存'}
-            </button>
+          <div className="flex justify-between items-center mt-6">
+            {editData ? (
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(true)}
+                disabled={loading}
+                className="px-6 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+              >
+                削除
+              </button>
+            ) : (
+              <div></div>
+            )}
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={loading}
+                className="px-6 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 disabled:opacity-50"
+              >
+                キャンセル
+              </button>
+              <button
+                type="submit"
+                disabled={loading}
+                className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+              >
+                {loading ? '保存中...' : '保存'}
+              </button>
+            </div>
           </div>
         </form>
       </div>
+
+      {/* Delete confirmation dialog */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
+          <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-xl font-bold text-white mb-4">イベントを削除</h3>
+            <p className="text-gray-300 mb-6">
+              このイベントを削除してもよろしいですか？この操作は取り消せません。
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={loading}
+                className="px-6 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 disabled:opacity-50"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={loading}
+                className="px-6 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+              >
+                {loading ? '削除中...' : '削除'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

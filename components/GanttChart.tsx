@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import EventForm from './EventForm';
+import TaskForm from './TaskForm';
 import {
   DndContext,
   closestCenter,
@@ -51,6 +52,7 @@ interface Task {
   assignee: string | null;
   status: string;
   display_order: number;
+  note: string | null;
   events: Event[];
 }
 
@@ -61,6 +63,7 @@ interface Event {
   assignee: string | null;
   status: string;
   task_id: string;
+  note: string | null;
 }
 
 interface GanttChartProps {
@@ -80,6 +83,8 @@ const TIMELINE_PADDING = 8; // p-2 = 0.5rem = 8px
 
 const STORAGE_KEY_CATEGORIES = 'gantt_expanded_categories';
 const STORAGE_KEY_SUBCATEGORIES = 'gantt_expanded_subcategories';
+const STORAGE_KEY_SCROLL_POSITION = 'gantt_scroll_position';
+const STORAGE_KEY_SHOULD_RESTORE = 'gantt_should_restore_scroll';
 
 // Sortable Task Row Component
 interface SortableTaskRowProps {
@@ -92,8 +97,13 @@ interface SortableTaskRowProps {
   getEventColor: (status: string) => { bg: string; hover: string; border: string };
   handleEventClick: (event: Event) => void;
   handleAddEvent: (taskId: string, date: string) => void;
+  handleTaskEdit: (task: Task) => void;
   mouseDownInfo: { taskId: string; mouseDownX: number; mouseDownTime: number } | null;
   setMouseDownInfo: (info: { taskId: string; mouseDownX: number; mouseDownTime: number } | null) => void;
+  lastClickInfo: { taskId: string; time: number } | null;
+  setLastClickInfo: (info: { taskId: string; time: number } | null) => void;
+  singleClickTimer: NodeJS.Timeout | null;
+  setSingleClickTimer: (timer: NodeJS.Timeout | null) => void;
   timelineWidth: number;
   cellWidth: number;
   unitInMs: number;
@@ -109,8 +119,13 @@ function SortableTaskRow({
   getEventColor,
   handleEventClick,
   handleAddEvent,
+  handleTaskEdit,
   mouseDownInfo,
   setMouseDownInfo,
+  lastClickInfo,
+  setLastClickInfo,
+  singleClickTimer,
+  setSingleClickTimer,
   timelineWidth,
   cellWidth,
   unitInMs,
@@ -190,32 +205,57 @@ function SortableTaskRow({
 
                   // If mouse didn't move much and time was short, treat as click
                   if (timeDiff < 300 && distanceMoved < 5) {
-                    // Calculate clicked position in timeline
-                    const container = e.currentTarget.parentElement;
-                    if (container) {
-                      const containerRect = container.getBoundingClientRect();
-                      const clickX = e.clientX - containerRect.left;
+                    const now = Date.now();
 
-                      // Calculate which unit was clicked
-                      const clickedUnit = Math.floor(clickX / cellWidth);
-
-                      // Calculate the date (without the +1 shift)
-                      const chartStart = timelineDates[0];
-                      const clickedDate = new Date(chartStart);
-                      if (viewMode === 'day') {
-                        clickedDate.setDate(chartStart.getDate() + clickedUnit);
-                      } else {
-                        clickedDate.setDate(chartStart.getDate() + clickedUnit * 7);
+                    // Check for double-click
+                    if (lastClickInfo &&
+                        lastClickInfo.taskId === task.id &&
+                        now - lastClickInfo.time < 300) {
+                      // Double-click detected
+                      if (singleClickTimer) {
+                        clearTimeout(singleClickTimer);
+                        setSingleClickTimer(null);
                       }
-
-                      // Format date as YYYY-MM-DD
-                      const dateStr = clickedDate.toISOString().split('T')[0];
-
-                      // Clear mouse down info
+                      setLastClickInfo(null);
                       setMouseDownInfo(null);
 
-                      // Open event add dialog with the clicked date
-                      handleAddEvent(task.id, dateStr);
+                      // Open task edit dialog
+                      handleTaskEdit(task);
+                    } else {
+                      // Single click - delay execution to check for double-click
+                      setLastClickInfo({ taskId: task.id, time: now });
+
+                      // Calculate clicked position for event creation
+                      const container = e.currentTarget.parentElement;
+                      if (container) {
+                        const containerRect = container.getBoundingClientRect();
+                        const clickX = e.clientX - containerRect.left;
+
+                        // Calculate which unit was clicked
+                        const clickedUnit = Math.floor(clickX / cellWidth);
+
+                        // Calculate the date (without the +1 shift)
+                        const chartStart = timelineDates[0];
+                        const clickedDate = new Date(chartStart);
+                        if (viewMode === 'day') {
+                          clickedDate.setDate(chartStart.getDate() + clickedUnit);
+                        } else {
+                          clickedDate.setDate(chartStart.getDate() + clickedUnit * 7);
+                        }
+
+                        // Format date as YYYY-MM-DD
+                        const dateStr = clickedDate.toISOString().split('T')[0];
+
+                        // Delay single-click action
+                        const timer = setTimeout(() => {
+                          handleAddEvent(task.id, dateStr);
+                          setSingleClickTimer(null);
+                        }, 300);
+
+                        setSingleClickTimer(timer);
+                      }
+
+                      setMouseDownInfo(null);
                     }
                   }
                 }
@@ -223,7 +263,7 @@ function SortableTaskRow({
               onClick={(e) => {
                 e.stopPropagation(); // Prevent task edit dialog
               }}
-              title={`${task.name} (${task.status})`}
+              title={`${task.name} (${task.status})${task.note ? '\nメモ: ' + task.note : ''}`}
             >
               <div className="text-xs text-white px-2 py-1 truncate pointer-events-none">
                 {task.name}
@@ -232,59 +272,80 @@ function SortableTaskRow({
           </>
         )}
         {/* Event markers with balloons */}
-        {task.events.map((event, eventIndex) => {
-          if (!event.due_date) return null;
-          const eventDate = parseDateString(event.due_date);
-
-          // Find which timeline cell this event falls in
-          let eventCellIndex = -1;
-          for (let i = 0; i < timelineDates.length; i++) {
-            const cellDate = timelineDates[i];
-            const nextCellDate = i < timelineDates.length - 1
-              ? timelineDates[i + 1]
-              : new Date(cellDate.getTime() + unitInMs);
-
-            if (eventDate >= cellDate && eventDate < nextCellDate) {
-              eventCellIndex = i;
-              break;
+        {(() => {
+          // Group events by date
+          const eventsByDate = new Map<string, typeof task.events>();
+          task.events.forEach((event) => {
+            if (event.due_date) {
+              const dateKey = event.due_date.split('T')[0]; // Use YYYY-MM-DD as key
+              if (!eventsByDate.has(dateKey)) {
+                eventsByDate.set(dateKey, []);
+              }
+              eventsByDate.get(dateKey)!.push(event);
             }
-          }
+          });
 
-          if (eventCellIndex === -1) return null; // Event is outside visible range
+          return task.events.map((event, eventIndex) => {
+            if (!event.due_date) return null;
+            const eventDate = parseDateString(event.due_date);
+            const dateKey = event.due_date.split('T')[0];
 
-          // Calculate position using fixed cell width (add +1 for shift, center in cell)
-          const eventPos = (eventCellIndex + 1) * cellWidth + (cellWidth / 2);
+            // Find which timeline cell this event falls in
+            let eventCellIndex = -1;
+            for (let i = 0; i < timelineDates.length; i++) {
+              const cellDate = timelineDates[i];
+              const nextCellDate = i < timelineDates.length - 1
+                ? timelineDates[i + 1]
+                : new Date(cellDate.getTime() + unitInMs);
 
-          const eventColor = getEventColor(event.status);
+              if (eventDate >= cellDate && eventDate < nextCellDate) {
+                eventCellIndex = i;
+                break;
+              }
+            }
 
-          return (
-            <div
-              key={event.id}
-              className="absolute cursor-pointer group"
-              style={{
-                left: `${eventPos + TIMELINE_PADDING}px`,
-                top: '50%',
-                transform: 'translate(-50%, -50%)',
-                zIndex: 12,
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleEventClick(event);
-              }}
-            >
-              {/* Balloon */}
-              <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 whitespace-nowrap pointer-events-none">
-                <div className={`${eventColor.bg} ${eventColor.hover} text-white text-xs px-2 py-1 rounded shadow-md max-w-[150px] truncate pointer-events-auto`}>
-                  {event.name}
+            if (eventCellIndex === -1) return null; // Event is outside visible range
+
+            // Calculate position using fixed cell width (add +1 for shift, center in cell)
+            const eventPos = (eventCellIndex + 1) * (cellWidth - 0.14) + ((cellWidth - 0.14) / 2);
+
+            // Calculate vertical offset for stacked events on same date
+            const eventsOnThisDate = eventsByDate.get(dateKey) || [];
+            const indexInDate = eventsOnThisDate.findIndex(e => e.id === event.id);
+            const totalEventsOnDate = eventsOnThisDate.length;
+            const verticalOffset = (indexInDate - (totalEventsOnDate - 1) / 2) * 24; // 24px spacing
+
+            const eventColor = getEventColor(event.status);
+
+            return (
+              <div
+                key={event.id}
+                className="absolute cursor-pointer group"
+                style={{
+                  left: `${eventPos + TIMELINE_PADDING}px`,
+                  top: '50%',
+                  transform: `translate(-50%, calc(-50% + ${verticalOffset}px))`,
+                  zIndex: 12,
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleEventClick(event);
+                }}
+              >
+                {/* Balloon */}
+                <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 whitespace-nowrap pointer-events-none">
+                  <div className={`${eventColor.bg} ${eventColor.hover} text-white text-xs px-2 py-1 rounded shadow-md max-w-[150px] truncate pointer-events-auto`}>
+                    {event.name}
+                  </div>
+                  {/* Arrow pointing down */}
+                  <div className={`absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-l-[6px] border-r-[6px] border-t-[6px] border-l-transparent border-r-transparent ${eventColor.border}`}></div>
                 </div>
-                {/* Arrow pointing down */}
-                <div className={`absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-l-[6px] border-r-[6px] border-t-[6px] border-l-transparent border-r-transparent ${eventColor.border}`}></div>
+                {/* Dot */}
+                <div className={`w-3 h-3 ${eventColor.bg} rounded-full border-2 border-white`}></div>
               </div>
-              {/* Dot */}
-              <div className={`w-3 h-3 ${eventColor.bg} rounded-full border-2 border-white`}></div>
-            </div>
-          );
-        })}
+            );
+          });
+        })()}
       </div>
     </div>
   );
@@ -297,6 +358,10 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
     date.setDate(date.getDate() - 7); // 1週間前
     return date;
   });
+
+  // Scroll container ref for preserving scroll position
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const shouldRestoreScroll = useRef<boolean>(false);
 
   // Load expanded state from localStorage on mount
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(() => {
@@ -332,6 +397,8 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
+  const [isTaskFormOpen, setIsTaskFormOpen] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [localTasks, setLocalTasks] = useState<Task[]>(tasks);
 
   // Click detection for task bars
@@ -340,6 +407,13 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
     mouseDownX: number;
     mouseDownTime: number;
   } | null>(null);
+
+  // Double-click detection for task bars
+  const [lastClickInfo, setLastClickInfo] = useState<{
+    taskId: string;
+    time: number;
+  } | null>(null);
+  const [singleClickTimer, setSingleClickTimer] = useState<NodeJS.Timeout | null>(null);
 
   // Sync local tasks with props and initialize/cleanup localStorage order
   useEffect(() => {
@@ -383,6 +457,79 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
       localStorage.setItem(STORAGE_KEY_SUBCATEGORIES, JSON.stringify(Array.from(expandedSubCategories)));
     }
   }, [expandedSubCategories]);
+
+  // Restore scroll position after tasks update
+  useEffect(() => {
+    const shouldRestore = typeof window !== 'undefined'
+      ? localStorage.getItem(STORAGE_KEY_SHOULD_RESTORE) === 'true'
+      : false;
+
+    console.log('[Scroll Debug] Restore effect triggered', {
+      shouldRestore,
+      shouldRestoreRef: shouldRestoreScroll.current,
+      hasRef: !!scrollContainerRef.current,
+      tasksLength: tasks.length
+    });
+
+    if (shouldRestore && scrollContainerRef.current) {
+      const savedPosition = localStorage.getItem(STORAGE_KEY_SCROLL_POSITION);
+      console.log('[Scroll Debug] Saved position from localStorage:', savedPosition);
+
+      if (savedPosition) {
+        try {
+          const { scrollLeft, scrollTop } = JSON.parse(savedPosition);
+          console.log('[Scroll Debug] Parsed position:', { scrollLeft, scrollTop });
+
+          // Use setTimeout to ensure DOM is updated
+          setTimeout(() => {
+            if (scrollContainerRef.current) {
+              console.log('[Scroll Debug] Restoring scroll position...', { scrollLeft, scrollTop });
+              scrollContainerRef.current.scrollLeft = scrollLeft;
+              scrollContainerRef.current.scrollTop = scrollTop;
+              console.log('[Scroll Debug] Scroll position restored. Current:', {
+                left: scrollContainerRef.current.scrollLeft,
+                top: scrollContainerRef.current.scrollTop
+              });
+            }
+            // Clear the flag after restoration
+            if (typeof window !== 'undefined') {
+              localStorage.removeItem(STORAGE_KEY_SHOULD_RESTORE);
+            }
+            shouldRestoreScroll.current = false;
+          }, 100); // Increased timeout to ensure DOM is fully updated
+        } catch (e) {
+          console.error('[Scroll Debug] Error parsing saved position:', e);
+        }
+      }
+    }
+  }, [tasks]);
+
+  // Save scroll position on scroll
+  useEffect(() => {
+    const scrollContainer = scrollContainerRef.current;
+    console.log('[Scroll Debug] Setting up scroll event listener', { hasRef: !!scrollContainer });
+
+    if (!scrollContainer) return;
+
+    const handleScroll = () => {
+      if (typeof window !== 'undefined') {
+        const position = {
+          scrollLeft: scrollContainer.scrollLeft,
+          scrollTop: scrollContainer.scrollTop,
+        };
+        //console.log('[Scroll Debug] Scroll event fired, saving position:', position);
+        localStorage.setItem(STORAGE_KEY_SCROLL_POSITION, JSON.stringify(position));
+      }
+    };
+
+    scrollContainer.addEventListener('scroll', handleScroll);
+    console.log('[Scroll Debug] Scroll event listener attached');
+
+    return () => {
+      console.log('[Scroll Debug] Removing scroll event listener');
+      scrollContainer.removeEventListener('scroll', handleScroll);
+    };
+  }, []);
 
   // Setup drag and drop sensors
   const sensors = useSensors(
@@ -743,6 +890,26 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
     return colors[status] || { bg: 'bg-red-500', hover: 'hover:bg-red-400', border: 'border-t-red-500' };
   };
 
+  // Save scroll position and prepare for restoration
+  const saveScrollPositionAndRefresh = () => {
+    console.log('[Scroll Debug] saveScrollPositionAndRefresh called');
+    console.log('[Scroll Debug] Ref exists:', !!scrollContainerRef.current);
+
+    if (scrollContainerRef.current && typeof window !== 'undefined') {
+      const position = {
+        scrollLeft: scrollContainerRef.current.scrollLeft,
+        scrollTop: scrollContainerRef.current.scrollTop,
+      };
+      console.log('[Scroll Debug] Saving position before refresh:', position);
+      localStorage.setItem(STORAGE_KEY_SCROLL_POSITION, JSON.stringify(position));
+      localStorage.setItem(STORAGE_KEY_SHOULD_RESTORE, 'true');
+      shouldRestoreScroll.current = true;
+      console.log('[Scroll Debug] shouldRestoreScroll flag saved to localStorage');
+    }
+    console.log('[Scroll Debug] Calling onRefresh...');
+    onRefresh();
+  };
+
   const handleEventClick = (event: Event) => {
     setSelectedEvent(event);
     setSelectedTaskId(event.task_id);
@@ -757,6 +924,11 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
     setSelectedTaskId(taskId);
     setSelectedDate(date);
     setIsEventFormOpen(true);
+  };
+
+  const handleTaskEdit = (task: Task) => {
+    setSelectedTask(task);
+    setIsTaskFormOpen(true);
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -840,7 +1012,7 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
           </div>
         </div>
 
-        <div className="overflow-x-auto overflow-y-auto max-h-[600px]">
+        <div ref={scrollContainerRef} className="overflow-x-auto overflow-y-auto max-h-[600px]">
           <div className="relative" style={{ width: `${timelineWidth + 256}px` }}>
             {/* Today vertical bar */}
             {todayPosition !== null && (
@@ -988,54 +1160,78 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
                             title={`${category}: ${categoryPosition.start.toLocaleDateString('ja-JP')} - ${categoryPosition.end.toLocaleDateString('ja-JP')}`}
                           />
                           {/* Event markers for all tasks in category */}
-                          {allCategoryTasks.flatMap(task =>
-                            (task.events || []).map(event => ({ task, event }))
-                          ).map(({ task, event }, eventIndex) => {
-                            if (!event.due_date) return null;
-                            const eventDate = parseDateString(event.due_date);
-
-                            // Find which timeline cell this event falls in
-                            let eventCellIndex = -1;
-                            for (let i = 0; i < timelineDates.length; i++) {
-                              const cellDate = timelineDates[i];
-                              const nextCellDate = i < timelineDates.length - 1
-                                ? timelineDates[i + 1]
-                                : new Date(cellDate.getTime() + unitInMs);
-
-                              if (eventDate >= cellDate && eventDate < nextCellDate) {
-                                eventCellIndex = i;
-                                break;
-                              }
-                            }
-
-                            if (eventCellIndex === -1) return null; // Event is outside visible range
-
-                            // Calculate position using fixed cell width (add +1 for shift, center in cell)
-                            const eventPos = (eventCellIndex + 1) * cellWidth + (cellWidth / 2);
-
-                            const eventColor = getEventColor(event.status);
-                            const tooltipText = `${task.sub_category} : ${task.name} : ${event.name}`;
-
-                            return (
-                              <div
-                                key={`cat-event-${event.id}-${eventIndex}`}
-                                className="absolute cursor-pointer"
-                                style={{
-                                  left: `${eventPos + TIMELINE_PADDING}px`,
-                                  top: '50%',
-                                  transform: 'translate(-50%, -50%)',
-                                  zIndex: 12,
-                                }}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleEventClick(event);
-                                }}
-                                title={tooltipText}
-                              >
-                                <div className={`w-2.5 h-2.5 ${eventColor.bg} rounded-full border border-white`}></div>
-                              </div>
+                          {(() => {
+                            // Collect all events from category tasks
+                            const allEvents = allCategoryTasks.flatMap(task =>
+                              (task.events || []).map(event => ({ task, event }))
                             );
-                          })}
+
+                            // Group events by date
+                            const eventsByDate = new Map<string, typeof allEvents>();
+                            allEvents.forEach(({ task, event }) => {
+                              if (event.due_date) {
+                                const dateKey = event.due_date.split('T')[0];
+                                if (!eventsByDate.has(dateKey)) {
+                                  eventsByDate.set(dateKey, []);
+                                }
+                                eventsByDate.get(dateKey)!.push({ task, event });
+                              }
+                            });
+
+                            return allEvents.map(({ task, event }, eventIndex) => {
+                              if (!event.due_date) return null;
+                              const eventDate = parseDateString(event.due_date);
+                              const dateKey = event.due_date.split('T')[0];
+
+                              // Find which timeline cell this event falls in
+                              let eventCellIndex = -1;
+                              for (let i = 0; i < timelineDates.length; i++) {
+                                const cellDate = timelineDates[i];
+                                const nextCellDate = i < timelineDates.length - 1
+                                  ? timelineDates[i + 1]
+                                  : new Date(cellDate.getTime() + unitInMs);
+
+                                if (eventDate >= cellDate && eventDate < nextCellDate) {
+                                  eventCellIndex = i;
+                                  break;
+                                }
+                              }
+
+                              if (eventCellIndex === -1) return null; // Event is outside visible range
+
+                              // Calculate position using fixed cell width (add +1 for shift, center in cell)
+                              const eventPos = (eventCellIndex + 1) * (cellWidth - 0.14) + ((cellWidth - 0.14) / 2);
+
+                              // Calculate vertical offset for stacked events on same date
+                              const eventsOnThisDate = eventsByDate.get(dateKey) || [];
+                              const indexInDate = eventsOnThisDate.findIndex(e => e.event.id === event.id);
+                              const totalEventsOnDate = eventsOnThisDate.length;
+                              const verticalOffset = (indexInDate - (totalEventsOnDate - 1) / 2) * 12; // 12px spacing
+
+                              const eventColor = getEventColor(event.status);
+                              const tooltipText = `${task.sub_category} : ${task.name} : ${event.name}${event.note ? '\nメモ: ' + event.note : ''}`;
+
+                              return (
+                                <div
+                                  key={`cat-event-${event.id}-${eventIndex}`}
+                                  className="absolute cursor-pointer"
+                                  style={{
+                                    left: `${eventPos + TIMELINE_PADDING}px`,
+                                    top: '50%',
+                                    transform: `translate(-50%, calc(-50% + ${verticalOffset}px))`,
+                                    zIndex: 12,
+                                  }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleEventClick(event);
+                                  }}
+                                  title={tooltipText}
+                                >
+                                  <div className={`w-2.5 h-2.5 ${eventColor.bg} rounded-full border border-white`}></div>
+                                </div>
+                              );
+                            });
+                          })()}
                         </>
                       )}
                     </div>
@@ -1139,54 +1335,78 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
                                     title={`${subCategory}: ${subCategoryPosition.start.toLocaleDateString('ja-JP')} - ${subCategoryPosition.end.toLocaleDateString('ja-JP')}`}
                                   />
                                   {/* Event markers for all tasks in subcategory */}
-                                  {subTasks.flatMap(task =>
-                                    (task.events || []).map(event => ({ task, event }))
-                                  ).map(({ task, event }, eventIndex) => {
-                                    if (!event.due_date) return null;
-                                    const eventDate = parseDateString(event.due_date);
-
-                                    // Find which timeline cell this event falls in
-                                    let eventCellIndex = -1;
-                                    for (let i = 0; i < timelineDates.length; i++) {
-                                      const cellDate = timelineDates[i];
-                                      const nextCellDate = i < timelineDates.length - 1
-                                        ? timelineDates[i + 1]
-                                        : new Date(cellDate.getTime() + unitInMs);
-
-                                      if (eventDate >= cellDate && eventDate < nextCellDate) {
-                                        eventCellIndex = i;
-                                        break;
-                                      }
-                                    }
-
-                                    if (eventCellIndex === -1) return null; // Event is outside visible range
-
-                                    // Calculate position using fixed cell width (add +1 for shift, center in cell)
-                                    const eventPos = (eventCellIndex + 1) * cellWidth + (cellWidth / 2);
-
-                                    const eventColor = getEventColor(event.status);
-                                    const tooltipText = `${task.name} : ${event.name}`;
-
-                                    return (
-                                      <div
-                                        key={`subcat-event-${event.id}-${eventIndex}`}
-                                        className="absolute cursor-pointer"
-                                        style={{
-                                          left: `${eventPos + TIMELINE_PADDING}px`,
-                                          top: '50%',
-                                          transform: 'translate(-50%, -50%)',
-                                          zIndex: 12,
-                                        }}
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleEventClick(event);
-                                        }}
-                                        title={tooltipText}
-                                      >
-                                        <div className={`w-2.5 h-2.5 ${eventColor.bg} rounded-full border border-white`}></div>
-                                      </div>
+                                  {(() => {
+                                    // Collect all events from subcategory tasks
+                                    const allEvents = subTasks.flatMap(task =>
+                                      (task.events || []).map(event => ({ task, event }))
                                     );
-                                  })}
+
+                                    // Group events by date
+                                    const eventsByDate = new Map<string, typeof allEvents>();
+                                    allEvents.forEach(({ task, event }) => {
+                                      if (event.due_date) {
+                                        const dateKey = event.due_date.split('T')[0];
+                                        if (!eventsByDate.has(dateKey)) {
+                                          eventsByDate.set(dateKey, []);
+                                        }
+                                        eventsByDate.get(dateKey)!.push({ task, event });
+                                      }
+                                    });
+
+                                    return allEvents.map(({ task, event }, eventIndex) => {
+                                      if (!event.due_date) return null;
+                                      const eventDate = parseDateString(event.due_date);
+                                      const dateKey = event.due_date.split('T')[0];
+
+                                      // Find which timeline cell this event falls in
+                                      let eventCellIndex = -1;
+                                      for (let i = 0; i < timelineDates.length; i++) {
+                                        const cellDate = timelineDates[i];
+                                        const nextCellDate = i < timelineDates.length - 1
+                                          ? timelineDates[i + 1]
+                                          : new Date(cellDate.getTime() + unitInMs);
+
+                                        if (eventDate >= cellDate && eventDate < nextCellDate) {
+                                          eventCellIndex = i;
+                                          break;
+                                        }
+                                      }
+
+                                      if (eventCellIndex === -1) return null; // Event is outside visible range
+
+                                      // Calculate position using fixed cell width (add +1 for shift, center in cell)
+                                      const eventPos = (eventCellIndex + 1) * (cellWidth - 0.14) + ((cellWidth - 0.14) / 2);
+
+                                      // Calculate vertical offset for stacked events on same date
+                                      const eventsOnThisDate = eventsByDate.get(dateKey) || [];
+                                      const indexInDate = eventsOnThisDate.findIndex(e => e.event.id === event.id);
+                                      const totalEventsOnDate = eventsOnThisDate.length;
+                                      const verticalOffset = (indexInDate - (totalEventsOnDate - 1) / 2) * 12; // 12px spacing
+
+                                      const eventColor = getEventColor(event.status);
+                                      const tooltipText = `${task.name} : ${event.name}${event.note ? '\nメモ: ' + event.note : ''}`;
+
+                                      return (
+                                        <div
+                                          key={`subcat-event-${event.id}-${eventIndex}`}
+                                          className="absolute cursor-pointer"
+                                          style={{
+                                            left: `${eventPos + TIMELINE_PADDING}px`,
+                                            top: '50%',
+                                            transform: `translate(-50%, calc(-50% + ${verticalOffset}px))`,
+                                            zIndex: 12,
+                                          }}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleEventClick(event);
+                                          }}
+                                          title={tooltipText}
+                                        >
+                                          <div className={`w-2.5 h-2.5 ${eventColor.bg} rounded-full border border-white`}></div>
+                                        </div>
+                                      );
+                                    });
+                                  })()}
                                 </>
                               )}
                             </div>
@@ -1212,8 +1432,13 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
                                 getEventColor={getEventColor}
                                 handleEventClick={handleEventClick}
                                 handleAddEvent={handleAddEvent}
+                                handleTaskEdit={handleTaskEdit}
                                 mouseDownInfo={mouseDownInfo}
                                 setMouseDownInfo={setMouseDownInfo}
+                                lastClickInfo={lastClickInfo}
+                                setLastClickInfo={setLastClickInfo}
+                                singleClickTimer={singleClickTimer}
+                                setSingleClickTimer={setSingleClickTimer}
                                 timelineWidth={timelineWidth}
                                 cellWidth={cellWidth}
                                 unitInMs={unitInMs}
@@ -1239,10 +1464,20 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
             setSelectedDate(null);
             setSelectedEvent(null);
           }}
-          onSave={onRefresh}
+          onSave={saveScrollPositionAndRefresh}
           taskId={selectedTaskId || undefined}
           editData={selectedEvent}
           selectedDate={selectedDate}
+        />
+
+        <TaskForm
+          isOpen={isTaskFormOpen}
+          onClose={() => {
+            setIsTaskFormOpen(false);
+            setSelectedTask(null);
+          }}
+          onSave={saveScrollPositionAndRefresh}
+          editData={selectedTask}
         />
       </div>
     </DndContext>
