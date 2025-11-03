@@ -157,6 +157,7 @@ interface TaskRowProps {
   handleCellClick: (taskId: string, field: string, currentValue: any) => void;
   handleCellSave: () => void;
   handleKeyDown: (e: React.KeyboardEvent) => void;
+  handleEditTask: (task: Task) => void;
   handleDuplicateTask: (task: Task) => void;
   handleDeleteTask: (taskId: string) => void;
   categories: string[];
@@ -175,6 +176,7 @@ function TaskRow({
   handleCellClick,
   handleCellSave,
   handleKeyDown,
+  handleEditTask,
   handleDuplicateTask,
   handleDeleteTask,
   categories,
@@ -1022,6 +1024,7 @@ export default function Home() {
                         handleCellClick={handleCellClick}
                         handleCellSave={handleCellSave}
                         handleKeyDown={handleKeyDown}
+                        handleEditTask={handleEditTask}
                         handleDuplicateTask={handleDuplicateTask}
                         handleDeleteTask={handleDeleteTask}
                         categories={categories}
