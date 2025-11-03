@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import nodemailer from 'nodemailer';
 
@@ -28,7 +28,14 @@ interface Event {
   task_sub_category: string;
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const authHeader = request.headers.get('authorization');
+  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    return new Response('Unauthorized', {
+      status: 401,
+    });
+  }
+
   try {
     console.log('[CRON] Starting cron job...');
     console.log('[CRON] GMAIL_USER:', process.env.GMAIL_USER ? 'Set' : 'Not set');
