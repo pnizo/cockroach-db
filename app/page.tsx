@@ -856,14 +856,14 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-8">
+    <div className="min-h-screen bg-gray-900 text-white p-4">
       <div className="max-w-[1920px] mx-auto">
-        <header className="mb-8">
-          <div className="flex justify-between items-center mb-6">
+        <header className="mb-2">
+          <div className="flex justify-between items-center mb-2">
             <div>
               <h2 className="text-4xl font-bold mb-2">コンテンツ事業進行表</h2>
             </div>
-            <div className="flex gap-4">
+            <div className="flex gap-2">
               <Link
                 href="/members"
                 className="px-6 py-1 bg-gray-700 text-white rounded-lg hover:bg-gray-600 font-semibold"

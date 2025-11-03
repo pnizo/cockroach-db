@@ -1078,7 +1078,7 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
           </div>
         </div>
 
-        <div ref={scrollContainerRef} className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-280px)]">
+        <div ref={scrollContainerRef} className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-224px)]">
           <div className="relative" style={{ width: `${timelineWidth + 352}px` }}>
             {/* Today vertical bar */}
             {todayPosition !== null && (
