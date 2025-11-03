@@ -32,6 +32,7 @@ import {
   initializeSubcategoryOrder,
   saveSubcategoryOrder,
   loadSubcategoryOrder,
+  loadTaskOrder,
   addCategoryToOrder,
   addSubcategoryToOrder,
 } from '@/lib/taskOrderStorage';
@@ -410,6 +411,7 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
   const [isTaskFormOpen, setIsTaskFormOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [localTasks, setLocalTasks] = useState<Task[]>(tasks);
+  const [isSavingOrder, setIsSavingOrder] = useState(false);
 
   // Click detection for task bars
   const [mouseDownInfo, setMouseDownInfo] = useState<{
@@ -941,6 +943,60 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
     setIsTaskFormOpen(true);
   };
 
+  const handleSaveOrder = async () => {
+    setIsSavingOrder(true);
+    try {
+      // Load current order from localStorage
+      const categoryOrder = loadCategoryOrder();
+      const subcategoryOrder = loadSubcategoryOrder();
+      const taskOrder = loadTaskOrder();
+
+      // Convert expand state Sets to Arrays
+      const expandedCategoriesArray = Array.from(expandedCategories);
+      const expandedSubcategoriesArray = Array.from(expandedSubCategories);
+
+      console.log('[GANTT] Saving order and expand state to database...');
+      console.log('[GANTT] Category order:', categoryOrder);
+      console.log('[GANTT] Subcategory order:', subcategoryOrder);
+      console.log('[GANTT] Task order:', taskOrder);
+      console.log('[GANTT] Expanded categories:', expandedCategoriesArray);
+      console.log('[GANTT] Expanded subcategories:', expandedSubcategoriesArray);
+
+      // Send to API
+      const response = await fetch('/api/order/save-all', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          categories: categoryOrder,
+          subcategories: subcategoryOrder,
+          tasks: taskOrder,
+          expandedCategories: expandedCategoriesArray,
+          expandedSubcategories: expandedSubcategoriesArray,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || '保存に失敗しました');
+      }
+
+      console.log('[GANTT] Order and expand state saved successfully:', data);
+      alert('並び順と展開状態を保存しました');
+    } catch (error) {
+      console.error('[GANTT] Error saving order:', error);
+      alert(
+        error instanceof Error
+          ? `保存に失敗しました: ${error.message}`
+          : '保存に失敗しました'
+      );
+    } finally {
+      setIsSavingOrder(false);
+    }
+  };
+
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
 
@@ -994,12 +1050,12 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
 
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-      <div className="bg-gray-800 rounded-lg p-4">
-        <div className="mb-4 flex justify-between items-center">
+      <div className="bg-gray-800 rounded-lg p-2">
+        <div className="mb-2 flex justify-between items-center">
           <div className="flex gap-2">
             <button
               onClick={() => setViewMode('day')}
-              className={`px-3 py-1 rounded ${
+              className={`px-3 py-0.5 rounded ${
                 viewMode === 'day' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300'
               }`}
             >
@@ -1007,7 +1063,7 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
             </button>
             <button
               onClick={() => setViewMode('week')}
-              className={`px-3 py-1 rounded ${
+              className={`px-3 py-0.5 rounded ${
                 viewMode === 'week' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300'
               }`}
             >
@@ -1017,12 +1073,12 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
               type="date"
               value={startDate.toISOString().split('T')[0]}
               onChange={(e) => setStartDate(new Date(e.target.value))}
-              className="px-3 py-1 bg-gray-700 text-white rounded border border-gray-600"
+              className="px-3 py-0.5 bg-gray-700 text-white rounded border border-gray-600"
             />
           </div>
         </div>
 
-        <div ref={scrollContainerRef} className="overflow-x-auto overflow-y-auto max-h-[600px]">
+        <div ref={scrollContainerRef} className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-280px)]">
           <div className="relative" style={{ width: `${timelineWidth + 352}px` }}>
             {/* Today vertical bar */}
             {todayPosition !== null && (
@@ -1037,7 +1093,16 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
             )}
             {/* Timeline header */}
             <div className="flex border-b border-gray-700 sticky top-0 bg-gray-800 z-30">
-              <div className="w-88 flex-shrink-0 p-2 font-bold text-gray-300 sticky left-0 bg-gray-800 z-30">タスク</div>
+              <div className="w-88 flex-shrink-0 p-2 font-bold text-gray-300 sticky left-0 bg-gray-800 z-30 flex items-center justify-between">
+                <span>タスク</span>
+                <button
+                  onClick={handleSaveOrder}
+                  disabled={isSavingOrder}
+                  className="text-xs px-3 py-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded transition-colors"
+                >
+                  {isSavingOrder ? '保存中...' : '並び順を保存'}
+                </button>
+              </div>
               <div className="flex relative p-2" style={{ width: `${timelineWidth}px` }}>
                 {timelineDates.map((date, index) => {
                   const today = new Date();

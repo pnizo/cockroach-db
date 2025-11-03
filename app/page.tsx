@@ -205,6 +205,12 @@ function TaskRow({
         <td key={column.id} className="px-4 py-3">
           <div className="flex gap-2">
             <button
+              onClick={() => handleEditTask(task)}
+              className="text-xs px-2 py-1 bg-green-600 hover:bg-green-700 rounded"
+            >
+              編集
+            </button>
+            <button
               onClick={() => handleDuplicateTask(task)}
               className="text-xs px-2 py-1 bg-blue-600 hover:bg-blue-700 rounded"
             >
@@ -855,18 +861,18 @@ export default function Home() {
         <header className="mb-8">
           <div className="flex justify-between items-center mb-6">
             <div>
-              <h1 className="text-4xl font-bold mb-2">コンテンツ事業進行表</h1>
+              <h2 className="text-4xl font-bold mb-2">コンテンツ事業進行表</h2>
             </div>
             <div className="flex gap-4">
               <Link
                 href="/members"
-                className="px-6 py-3 bg-gray-700 text-white rounded-lg hover:bg-gray-600 font-semibold"
+                className="px-6 py-1 bg-gray-700 text-white rounded-lg hover:bg-gray-600 font-semibold"
               >
                 メンバー管理
               </Link>
               <button
                 onClick={handleAddTask}
-                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold"
+                className="px-6 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold"
               >
                 + タスクを追加
               </button>
