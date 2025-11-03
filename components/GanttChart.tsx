@@ -147,21 +147,31 @@ function SortableTaskRow({
       className="flex border-b border-gray-700 hover:bg-gray-700 group"
     >
       <div
-        className="w-64 flex-shrink-0 p-2 pl-10 text-gray-300 flex items-center sticky left-0 bg-gray-800 group-hover:bg-gray-700 z-20"
+        className="w-88 flex-shrink-0 p-2 pl-10 text-gray-300 flex items-center justify-between sticky left-0 bg-gray-800 group-hover:bg-gray-700 z-20"
       >
-        <span
-          className="mr-2 text-gray-500 cursor-move"
-          {...attributes}
-          {...listeners}
-        >
-          ⋮⋮
-        </span>
-        <span
-          className="cursor-pointer hover:text-white hover:underline"
-          onClick={() => onTaskClick(task)}
-        >
-          {task.name}
-        </span>
+        <div className="flex items-center">
+          <span
+            className="mr-2 text-gray-500 cursor-move"
+            {...attributes}
+            {...listeners}
+          >
+            ⋮⋮
+          </span>
+          <span
+            className="cursor-pointer hover:text-white hover:underline"
+            onClick={() => onTaskClick(task)}
+          >
+            {task.name}
+          </span>
+        </div>
+        {task.assignee && (
+          <span
+            className="ml-2 text-gray-400 text-sm cursor-pointer hover:text-white hover:underline"
+            onClick={() => handleTaskEdit(task)}
+          >
+            {task.assignee}
+          </span>
+        )}
       </div>
       <div className="flex relative p-2" style={{ width: `${timelineWidth}px` }}>
         {timelineDates.map((date, index) => {
@@ -645,7 +655,7 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
 
     if (todayIndex === -1) return null;
 
-    return 256 + todayIndex * (cellWidth - 0.14); // 256px = fixed column width
+    return 352 + todayIndex * (cellWidth - 0.14); // 352px = fixed column width
   }, [timelineDates, viewMode, cellWidth]);
 
   const toggleCategory = (category: string) => {
@@ -1013,7 +1023,7 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
         </div>
 
         <div ref={scrollContainerRef} className="overflow-x-auto overflow-y-auto max-h-[600px]">
-          <div className="relative" style={{ width: `${timelineWidth + 256}px` }}>
+          <div className="relative" style={{ width: `${timelineWidth + 352}px` }}>
             {/* Today vertical bar */}
             {todayPosition !== null && (
               <div
@@ -1027,7 +1037,7 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
             )}
             {/* Timeline header */}
             <div className="flex border-b border-gray-700 sticky top-0 bg-gray-800 z-30">
-              <div className="w-64 flex-shrink-0 p-2 font-bold text-gray-300 sticky left-0 bg-gray-800 z-30">タスク</div>
+              <div className="w-88 flex-shrink-0 p-2 font-bold text-gray-300 sticky left-0 bg-gray-800 z-30">タスク</div>
               <div className="flex relative p-2" style={{ width: `${timelineWidth}px` }}>
                 {timelineDates.map((date, index) => {
                   const today = new Date();
@@ -1074,7 +1084,7 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
                 <div key={category}>
                   {/* Category header */}
                   <div className="flex bg-gray-700 hover:bg-gray-600 group">
-                    <div className="w-64 flex-shrink-0 p-2 font-bold text-white flex items-center gap-2 sticky left-0 bg-gray-700 group-hover:bg-gray-600 z-20">
+                    <div className="w-88 flex-shrink-0 p-2 font-bold text-white flex items-center gap-2 sticky left-0 bg-gray-700 group-hover:bg-gray-600 z-20">
                       <span
                         className="cursor-pointer"
                         onClick={() => toggleCategory(category)}
@@ -1251,7 +1261,7 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
                         <div key={subCategoryKey}>
                           {/* Subcategory header */}
                           <div className="flex bg-gray-800 hover:bg-gray-700 group">
-                            <div className="w-64 flex-shrink-0 p-2 pl-6 font-semibold text-gray-200 flex items-center gap-2 sticky left-0 bg-gray-800 group-hover:bg-gray-700 z-20">
+                            <div className="w-88 flex-shrink-0 p-2 pl-6 font-semibold text-gray-200 flex items-center gap-2 sticky left-0 bg-gray-800 group-hover:bg-gray-700 z-20">
                               <span
                                 className="cursor-pointer"
                                 onClick={() => toggleSubCategory(subCategoryKey)}

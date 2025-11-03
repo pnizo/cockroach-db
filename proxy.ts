@@ -2,6 +2,11 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 export function proxy(request: NextRequest) {
+  // Skip authentication for cron job endpoint
+  if (request.nextUrl.pathname === '/api/cron') {
+    return NextResponse.next();
+  }
+
   // Get authentication credentials from environment variables
   const BASIC_AUTH_USER = process.env.BASIC_AUTH_USER || 'admin';
   const BASIC_AUTH_PASSWORD = process.env.BASIC_AUTH_PASSWORD || 'password';
