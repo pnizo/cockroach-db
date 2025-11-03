@@ -1027,20 +1027,40 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
 
     if (oldIndex === newIndex) return;
 
-    // Reorder the tasks
+    // Reorder the tasks within the subcategory
     const reorderedSubcategoryTasks = arrayMove(subcategoryTasks, oldIndex, newIndex);
 
-    // Update display_order for reordered tasks
-    const updatedTasks = reorderedSubcategoryTasks.map((task, index) => ({
-      ...task,
-      display_order: index,
-    }));
+    // Create a map for quick lookup of reordered tasks by ID
+    const reorderedMap = new Map(reorderedSubcategoryTasks.map((task, index) => [task.id, index]));
 
-    // Update local state immediately for smooth UX
-    const newLocalTasks = localTasks.map((task) => {
-      const updatedTask = updatedTasks.find((t) => t.id === task.id);
-      return updatedTask || task;
-    });
+    // Separate tasks into the reordered subcategory and others
+    const otherTasks = localTasks.filter(
+      (t) => t.category !== activeTask.category || t.sub_category !== activeTask.sub_category
+    );
+
+    // Rebuild the task list:
+    // 1. Keep all tasks that are NOT in the affected subcategory
+    // 2. Insert the reordered subcategory tasks in the correct position
+    const newLocalTasks: Task[] = [];
+    let reorderedInserted = false;
+
+    for (const task of localTasks) {
+      const isInReorderedSubcategory =
+        task.category === activeTask.category && task.sub_category === activeTask.sub_category;
+
+      if (isInReorderedSubcategory) {
+        // Insert all reordered tasks at the position of the first task in this subcategory
+        if (!reorderedInserted) {
+          newLocalTasks.push(...reorderedSubcategoryTasks);
+          reorderedInserted = true;
+        }
+        // Skip individual tasks from this subcategory (already added as a group)
+      } else {
+        // Add tasks from other subcategories as-is
+        newLocalTasks.push(task);
+      }
+    }
+
     setLocalTasks(newLocalTasks);
 
     // Save the new order to localStorage (no API call, no page reload)
