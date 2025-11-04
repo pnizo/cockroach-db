@@ -179,7 +179,7 @@ export async function GET(request: NextRequest) {
       // Send email
       try {
         const today = new Date();
-        const jp_date = new Date(today.setDate(today.getDate() + 9));
+        const jp_date = new Date(today.setHours(today.getHours() + 9));
         const info = await transporter.sendMail({
           from: process.env.GMAIL_USER,
           to: member.email,
