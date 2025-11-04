@@ -366,7 +366,7 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
   const [viewMode, setViewMode] = useState<ViewMode>('day');
   const [startDate, setStartDate] = useState<Date>(() => {
     const date = new Date();
-    date.setDate(date.getDate() - 7); // 1週間前
+    date.setDate(date.getDate() - 14); // 2週間前
     return date;
   });
 
