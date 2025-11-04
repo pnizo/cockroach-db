@@ -34,8 +34,11 @@ yarn-error.log*
 .env
 .env*.local
 .env.development
+.env.staging
 .env.production
+# Allow example files to be committed
 !.env.example
+!.env*.example
 
 # vercel
 .vercel
