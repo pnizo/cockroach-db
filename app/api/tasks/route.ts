@@ -168,6 +168,17 @@ export async function PUT(request: Request) {
       );
     }
 
+    // Update child events that have no assignee to use the parent task's assignee
+    if (sanitizedAssignee !== undefined) {
+      await query(
+        `UPDATE event
+         SET assignee = $1, updated_at = CURRENT_TIMESTAMP
+         WHERE task_id = $2
+         AND (assignee IS NULL OR assignee = '')`,
+        [sanitizedAssignee, id]
+      );
+    }
+
     // console.log('DB returned start_date:', result[0]?.start_date);
     // console.log('DB returned end_date:', result[0]?.end_date);
     // console.log('=== END PUT /api/tasks DEBUG ===');

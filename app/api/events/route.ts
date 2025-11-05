@@ -46,9 +46,21 @@ export async function POST(request: Request) {
       );
     }
 
+    // Get parent task's assignee if event assignee is not provided
+    let finalAssignee = assignee;
+    if (!assignee || assignee === '') {
+      const parentTask = await query(
+        'SELECT assignee FROM task WHERE id = $1',
+        [task_id]
+      );
+      if (parentTask.length > 0 && parentTask[0].assignee) {
+        finalAssignee = parentTask[0].assignee;
+      }
+    }
+
     // Convert empty strings to null for nullable fields, and extract date part only
     const sanitizedDueDate = due_date === '' ? null : (due_date ? due_date.split('T')[0] : null);
-    const sanitizedAssignee = assignee === '' ? null : assignee || null;
+    const sanitizedAssignee = finalAssignee === '' ? null : finalAssignee || null;
     const sanitizedNote = note === '' ? null : note || null;
 
     const result = await query(

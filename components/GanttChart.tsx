@@ -476,32 +476,32 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
       ? localStorage.getItem(STORAGE_KEY_SHOULD_RESTORE) === 'true'
       : false;
 
-    console.log('[Scroll Debug] Restore effect triggered', {
-      shouldRestore,
-      shouldRestoreRef: shouldRestoreScroll.current,
-      hasRef: !!scrollContainerRef.current,
-      tasksLength: tasks.length
-    });
+    // console.log('[Scroll Debug] Restore effect triggered', {
+    //   shouldRestore,
+    //   shouldRestoreRef: shouldRestoreScroll.current,
+    //   hasRef: !!scrollContainerRef.current,
+    //   tasksLength: tasks.length
+    // });
 
     if (shouldRestore && scrollContainerRef.current) {
       const savedPosition = localStorage.getItem(STORAGE_KEY_SCROLL_POSITION);
-      console.log('[Scroll Debug] Saved position from localStorage:', savedPosition);
+      // console.log('[Scroll Debug] Saved position from localStorage:', savedPosition);
 
       if (savedPosition) {
         try {
           const { scrollLeft, scrollTop } = JSON.parse(savedPosition);
-          console.log('[Scroll Debug] Parsed position:', { scrollLeft, scrollTop });
+          // console.log('[Scroll Debug] Parsed position:', { scrollLeft, scrollTop });
 
           // Use setTimeout to ensure DOM is updated
           setTimeout(() => {
             if (scrollContainerRef.current) {
-              console.log('[Scroll Debug] Restoring scroll position...', { scrollLeft, scrollTop });
+              // console.log('[Scroll Debug] Restoring scroll position...', { scrollLeft, scrollTop });
               scrollContainerRef.current.scrollLeft = scrollLeft;
               scrollContainerRef.current.scrollTop = scrollTop;
-              console.log('[Scroll Debug] Scroll position restored. Current:', {
-                left: scrollContainerRef.current.scrollLeft,
-                top: scrollContainerRef.current.scrollTop
-              });
+              // console.log('[Scroll Debug] Scroll position restored. Current:', {
+              //   left: scrollContainerRef.current.scrollLeft,
+              //   top: scrollContainerRef.current.scrollTop
+              // });
             }
             // Clear the flag after restoration
             if (typeof window !== 'undefined') {
@@ -519,7 +519,7 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
   // Save scroll position on scroll
   useEffect(() => {
     const scrollContainer = scrollContainerRef.current;
-    console.log('[Scroll Debug] Setting up scroll event listener', { hasRef: !!scrollContainer });
+    // console.log('[Scroll Debug] Setting up scroll event listener', { hasRef: !!scrollContainer });
 
     if (!scrollContainer) return;
 
@@ -535,10 +535,10 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
     };
 
     scrollContainer.addEventListener('scroll', handleScroll);
-    console.log('[Scroll Debug] Scroll event listener attached');
+    // console.log('[Scroll Debug] Scroll event listener attached');
 
     return () => {
-      console.log('[Scroll Debug] Removing scroll event listener');
+      // console.log('[Scroll Debug] Removing scroll event listener');
       scrollContainer.removeEventListener('scroll', handleScroll);
     };
   }, []);
@@ -904,21 +904,21 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
 
   // Save scroll position and prepare for restoration
   const saveScrollPositionAndRefresh = () => {
-    console.log('[Scroll Debug] saveScrollPositionAndRefresh called');
-    console.log('[Scroll Debug] Ref exists:', !!scrollContainerRef.current);
+    // console.log('[Scroll Debug] saveScrollPositionAndRefresh called');
+    // console.log('[Scroll Debug] Ref exists:', !!scrollContainerRef.current);
 
     if (scrollContainerRef.current && typeof window !== 'undefined') {
       const position = {
         scrollLeft: scrollContainerRef.current.scrollLeft,
         scrollTop: scrollContainerRef.current.scrollTop,
       };
-      console.log('[Scroll Debug] Saving position before refresh:', position);
+      // console.log('[Scroll Debug] Saving position before refresh:', position);
       localStorage.setItem(STORAGE_KEY_SCROLL_POSITION, JSON.stringify(position));
       localStorage.setItem(STORAGE_KEY_SHOULD_RESTORE, 'true');
       shouldRestoreScroll.current = true;
-      console.log('[Scroll Debug] shouldRestoreScroll flag saved to localStorage');
+      // console.log('[Scroll Debug] shouldRestoreScroll flag saved to localStorage');
     }
-    console.log('[Scroll Debug] Calling onRefresh...');
+    // console.log('[Scroll Debug] Calling onRefresh...');
     onRefresh();
   };
 
@@ -1563,6 +1563,7 @@ export default function GanttChart({ tasks, onTaskClick, onAddTask, onRefresh }:
           taskId={selectedTaskId || undefined}
           editData={selectedEvent}
           selectedDate={selectedDate}
+          taskAssignee={selectedTaskId ? localTasks.find(t => t.id === selectedTaskId)?.assignee : null}
         />
 
         <TaskForm

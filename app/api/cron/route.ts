@@ -26,6 +26,7 @@ interface Event {
   task_name: string;
   task_category: string;
   task_sub_category: string;
+  task_status?: string;
 }
 
 export async function GET(request: NextRequest) {
@@ -114,9 +115,25 @@ export async function GET(request: NextRequest) {
 
       console.log(`[CRON] - Found ${events.length} events for today for ${member.name}`);
 
+      // Get overdue events assigned to this member
+      const overdueEvents = await query<Event>(
+        `SELECT e.id, e.name, e.due_date, e.status, t.name as task_name, t.category as task_category, t.sub_category as task_sub_category, t.status as task_status
+         FROM event e
+         JOIN task t ON e.task_id = t.id
+         WHERE e.assignee = $1
+         AND e.due_date < $2
+         AND e.status != $3
+         AND t.status != $4
+         ORDER BY e.due_date DESC`,
+        [member.name, today.toISOString(), 'Done', 'Done']
+      );
+
+      console.log(`[CRON] - Found ${overdueEvents.length} overdue events for ${member.name}`);
+
       // Skip if no tasks or events to report
       if ((!tasks || tasks.length === 0) &&
-          (!events || events.length === 0)) {
+          (!events || events.length === 0) &&
+          (!overdueEvents || overdueEvents.length === 0)) {
         console.log(`[CRON] - Skipping ${member.name} (no tasks or events to report)`);
         continue;
       }
@@ -143,7 +160,29 @@ export async function GET(request: NextRequest) {
           </tr>\n`;
         }
 
-        emailContent += '</tbody></table>\n';
+        emailContent += '</tbody></table>\n<br>\n';
+      }
+
+      // Add overdue events section
+      if (overdueEvents && overdueEvents.length > 0) {
+        emailContent += `<h3>⚠️ 未達成イベント (${overdueEvents.length}件)</h3>\n`;
+        emailContent += '<table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; width: 100%;">\n';
+        emailContent += '<thead><tr style="background-color: #fff3cd;"><th>イベント名</th><th>タスク名</th><th>サブカテゴリー</th><th>カテゴリー</th><th>開催日</th><th>ステータス</th></tr></thead>\n';
+        emailContent += '<tbody>\n';
+
+        for (const event of overdueEvents) {
+          const dueDate = event.due_date ? new Date(event.due_date).toLocaleDateString('ja-JP') : '-';
+          emailContent += `<tr style="background-color: #fff3cd;">
+            <td>${event.name}</td>
+            <td>${event.task_name}</td>
+            <td>${event.task_sub_category}</td>
+            <td>${event.task_category}</td>
+            <td>${dueDate}</td>
+            <td>${event.status}</td>
+          </tr>\n`;
+        }
+
+        emailContent += '</tbody></table>\n<br>\n';
       }
 
       // Add overdue tasks section
