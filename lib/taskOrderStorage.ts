@@ -129,6 +129,30 @@ export function addTaskToOrder<T extends MinimalTask>(task: T): void {
 }
 
 /**
+ * Add a new task to the end of a specific subcategory by ID
+ * Used when creating new tasks to immediately register them in localStorage
+ */
+export function addNewTaskToSubcategory(
+  category: string,
+  subCategory: string,
+  taskId: string
+): void {
+  const order = loadTaskOrder();
+  const key = getSubcategoryKey(category, subCategory);
+
+  if (!order[key]) {
+    order[key] = [];
+  }
+
+  // Only add if not already present
+  if (!order[key].includes(taskId)) {
+    order[key].push(taskId);
+  }
+
+  saveTaskOrder(order);
+}
+
+/**
  * Remove a task from the order
  */
 export function removeTaskFromOrder(taskId: string): void {

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import EventForm from './EventForm';
+import { addNewTaskToSubcategory } from '@/lib/taskOrderStorage';
 
 // Helper function to format date without timezone issues
 const formatDateDisplay = (dateString: string | null): string => {
@@ -167,6 +168,15 @@ export default function TaskForm({ isOpen, onClose, onSave, editData, initialCat
       // console.log('Returned start_date:', responseData.task?.start_date);
       // console.log('Returned end_date:', responseData.task?.end_date);
       // console.log('=== END TaskForm Submit DEBUG ===');
+
+      // If creating a new task, immediately register it in localStorage
+      if (!editData && responseData.task) {
+        addNewTaskToSubcategory(
+          responseData.task.category,
+          responseData.task.sub_category,
+          responseData.task.id
+        );
+      }
 
       onSave();
       onClose();
