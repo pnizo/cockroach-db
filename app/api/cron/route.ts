@@ -167,9 +167,9 @@ export async function GET(request: NextRequest) {
 
       // Add overdue events section
       if (overdueEvents && overdueEvents.length > 0) {
-        emailContent += `<h3>⚠️ 未達成イベント (${overdueEvents.length}件)</h3>\n`;
+        emailContent += `<h3>⚠️ 未完了イベント (${overdueEvents.length}件)</h3>\n`;
         emailContent += '<table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; width: 100%;">\n';
-        emailContent += '<thead><tr style="background-color: #fff3cd;"><th>イベント名</th><th>タスク名</th><th>サブカテゴリー</th><th>カテゴリー</th><th>開催日</th><th>ステータス</th></tr></thead>\n';
+        emailContent += '<thead><tr style="background-color: #fff3cd;"><th>イベント名</th><th>タスク名</th><th>サブカテゴリー</th><th>カテゴリー</th><th>期日</th><th>ステータス</th></tr></thead>\n';
         emailContent += '<tbody>\n';
 
         for (const event of overdueEvents) {
