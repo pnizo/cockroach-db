@@ -88,20 +88,20 @@ export async function GET(request: NextRequest) {
     for (const member of members) {
       console.log(`[CRON] Processing member: ${member.name} (${member.email})`);
 
-      // Get tasks assigned to this member that are overdue and not done
+      // Get tasks assigned to this member that are overdue and not done or icebox
       const tasks = await query<Task>(
         `SELECT id, name, category, sub_category, start_date, end_date, status
          FROM task
          WHERE assignee = $1
          AND start_date < CURRENT_TIMESTAMP
-         AND status != $2
+         AND status NOT IN ($2, $3)
          ORDER BY start_date ASC`,
-        [member.name, 'Done']
+        [member.name, 'Done', 'IceBox']
       );
 
       console.log(`[CRON] - Found ${tasks.length} incomplete tasks for ${member.name}`);
 
-      // Get events assigned to this member for today
+      // Get events assigned to this member for today (excluding Done and IceBox)
       const events = await query<Event>(
         `SELECT e.id, e.name, e.due_date, e.status, t.name as task_name, t.category as task_category, t.sub_category as task_sub_category
          FROM event e
@@ -109,23 +109,25 @@ export async function GET(request: NextRequest) {
          WHERE e.assignee = $1
          AND e.due_date >= $2
          AND e.due_date < $3
+         AND e.status NOT IN ($4, $5)
+         AND t.status NOT IN ($6, $7)
          ORDER BY e.due_date ASC`,
-        [member.name, today.toISOString(), tomorrow.toISOString()]
+        [member.name, today.toISOString(), tomorrow.toISOString(), 'Done', 'IceBox', 'Done', 'IceBox']
       );
 
       console.log(`[CRON] - Found ${events.length} events for today for ${member.name}`);
 
-      // Get overdue events assigned to this member
+      // Get overdue events assigned to this member (excluding Done and IceBox)
       const overdueEvents = await query<Event>(
         `SELECT e.id, e.name, e.due_date, e.status, t.name as task_name, t.category as task_category, t.sub_category as task_sub_category, t.status as task_status
          FROM event e
          JOIN task t ON e.task_id = t.id
          WHERE e.assignee = $1
          AND e.due_date < $2
-         AND e.status != $3
-         AND t.status != $4
+         AND e.status NOT IN ($3, $4)
+         AND t.status NOT IN ($5, $6)
          ORDER BY e.due_date DESC`,
-        [member.name, today.toISOString(), 'Done', 'Done']
+        [member.name, today.toISOString(), 'Done', 'IceBox', 'Done', 'IceBox']
       );
 
       console.log(`[CRON] - Found ${overdueEvents.length} overdue events for ${member.name}`);
