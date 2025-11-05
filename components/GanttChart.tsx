@@ -230,12 +230,6 @@ function SortableTaskRow({
                       setLastClickInfo(null);
                       setMouseDownInfo(null);
 
-                      // Open task edit dialog
-                      handleTaskEdit(task);
-                    } else {
-                      // Single click - delay execution to check for double-click
-                      setLastClickInfo({ taskId: task.id, time: now });
-
                       // Calculate clicked position for event creation
                       const container = e.currentTarget.parentElement;
                       if (container) {
@@ -257,14 +251,20 @@ function SortableTaskRow({
                         // Format date as YYYY-MM-DD
                         const dateStr = clickedDate.toISOString().split('T')[0];
 
-                        // Delay single-click action
-                        const timer = setTimeout(() => {
-                          handleAddEvent(task.id, dateStr);
-                          setSingleClickTimer(null);
-                        }, 300);
-
-                        setSingleClickTimer(timer);
+                        // Open event add dialog
+                        handleAddEvent(task.id, dateStr);
                       }
+                    } else {
+                      // Single click - delay execution to check for double-click
+                      setLastClickInfo({ taskId: task.id, time: now });
+
+                      // Delay single-click action
+                      const timer = setTimeout(() => {
+                        handleTaskEdit(task);
+                        setSingleClickTimer(null);
+                      }, 300);
+
+                      setSingleClickTimer(timer);
 
                       setMouseDownInfo(null);
                     }
